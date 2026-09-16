@@ -106,14 +106,12 @@ export default function HomePage() {
     const phrases = collectList.map(p => ({ japanese: p.japanese, english: p.english, situation: p.situation }));
     try {
       const batchId = await createBatch(user.uid, phrases);
-      // Also save to phrases collection
       for (const p of phrases) {
         await addPhrase(user.uid, { japanese: p.japanese, english: p.english, situation: p.situation });
       }
       setCollectList([]);
       const b = await getBatches(user.uid);
       setBatches(b);
-      // Check if all have translations
       const allTranslated = phrases.every(p => p.japanese && p.english);
       if (allTranslated) {
         router.push(`/study/${batchId}`);
