@@ -263,16 +263,12 @@ export default function HomePage() {
               className="flex-1 bg-gradient-to-r from-purple-500 to-indigo-500 text-white px-4 py-3 rounded-lg font-bold text-sm">
               🤖 AI翻訳ワークショップへ
             </button>
-          </div>
-        )}
-
-        {/* Create batch button - only at 25 with all translated */}
-        {count >= 25 && collectList.every(p => p.japanese && p.english) && (
-          <div className="mb-4">
-            <button onClick={handleCreateBatch}
-              className="w-full bg-gradient-to-r from-amber-500 to-orange-500 text-white px-4 py-3 rounded-lg font-bold text-sm">
-              📖 バッチ作成して学習開始！
-            </button>
+            {count >= 25 && collectList.every(p => p.japanese && p.english) && (
+              <button onClick={handleCreateBatch}
+                className="flex-1 bg-gradient-to-r from-amber-500 to-orange-500 text-white px-4 py-3 rounded-lg font-bold text-sm">
+                📖 学習開始
+              </button>
+            )}
           </div>
         )}
 
@@ -283,25 +279,25 @@ export default function HomePage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b-2 border-gray-200">
-                  <th className="text-left py-2 px-1 text-xs text-gray-400 w-8">#</th>
-                  <th className="text-left py-2 px-1 text-xs text-gray-400">日本語</th>
-                  <th className="text-left py-2 px-1 text-xs text-gray-400">English</th>
+                  <th className="text-left py-2 px-1 w-8 text-gray-400">#</th>
+                  <th className="text-left py-2 px-2 text-gray-600">日本語</th>
+                  <th className="text-left py-2 px-2 text-gray-600">English</th>
                   <th className="w-8"></th>
                 </tr>
               </thead>
               <tbody>
                 {collectList.map((p, i) => (
                   <tr key={i} className={`border-b border-gray-100 ${p.isAI ? 'bg-purple-50' : ''}`}>
-                    <td className="py-2 px-1 text-xs text-gray-400 align-top">{i + 1}</td>
-                    <td className="py-2 px-1 align-top">
+                    <td className="py-2 px-1 text-gray-400 text-xs font-bold">{i + 1}</td>
+                    <td className="py-2 px-2">
                       <div className="font-semibold text-sm">{p.japanese || <span className="text-gray-400 italic">（なし）</span>}</div>
                       {p.situation && <div className="text-xs text-gray-400">📍 {p.situation}</div>}
                       {p.isAI && <span className="text-xs bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded-full">✨ AI</span>}
                     </td>
-                    <td className={`py-2 px-1 align-top text-sm ${p.english ? 'text-blue-700' : 'text-orange-400 italic'}`}>
+                    <td className={`py-2 px-2 text-sm ${p.english ? 'text-blue-700' : 'text-orange-400 italic'}`}>
                       {p.english || '未翻訳'}
                     </td>
-                    <td className="py-2 px-1 align-top">
+                    <td className="py-2 px-1">
                       <button onClick={() => handleDelete(i)} className="text-gray-400 hover:text-red-500 text-lg">×</button>
                     </td>
                   </tr>
