@@ -222,7 +222,7 @@ export default function HomePage() {
         <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
           <div className="bg-blue-600 h-2 rounded-full transition-all" style={{ width: `${Math.min(100, (count / 25) * 100)}%` }} />
         </div>
-        <p className="text-sm text-gray-500 mb-4">あと <span className="font-bold text-blue-600">{Math.max(0, 25 - count)}</span> フレーズ必要</p>
+        <p className="text-sm text-gray-500 mb-4">あと {Math.max(0, 25 - count)} フレーズ必要</p>
 
         {/* Input */}
         <div className="bg-gray-50 rounded-xl p-4 mb-4 space-y-3">
@@ -276,25 +276,25 @@ export default function HomePage() {
         {collectList.length > 0 && (
           <div>
             <h3 className="text-sm font-bold text-gray-500 mb-2">収集済みフレーズ</h3>
-            <table className="w-full text-sm">
+            <table className="w-full text-sm border-collapse">
               <thead>
                 <tr className="border-b-2 border-gray-200">
-                  <th className="text-left py-2 px-1 w-8 text-gray-400">#</th>
-                  <th className="text-left py-2 px-2 text-gray-600">日本語</th>
-                  <th className="text-left py-2 px-2 text-gray-600">English</th>
+                  <th className="text-left py-2 px-2 text-xs font-bold text-gray-400 w-8">#</th>
+                  <th className="text-left py-2 px-2 text-xs font-bold text-gray-400">日本語</th>
+                  <th className="text-left py-2 px-2 text-xs font-bold text-gray-400">English</th>
                   <th className="w-8"></th>
                 </tr>
               </thead>
               <tbody>
                 {collectList.map((p, i) => (
                   <tr key={i} className={`border-b border-gray-100 ${p.isAI ? 'bg-purple-50' : ''}`}>
-                    <td className="py-2 px-1 text-gray-400 text-xs font-bold">{i + 1}</td>
+                    <td className="py-2 px-2 text-gray-400 font-bold text-xs">{i + 1}</td>
                     <td className="py-2 px-2">
-                      <div className="font-semibold text-sm">{p.japanese || <span className="text-gray-400 italic">（なし）</span>}</div>
+                      <div className="font-semibold">{p.japanese || <span className="text-gray-400 italic">（なし）</span>}</div>
                       {p.situation && <div className="text-xs text-gray-400">📍 {p.situation}</div>}
                       {p.isAI && <span className="text-xs bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded-full">✨ AI</span>}
                     </td>
-                    <td className={`py-2 px-2 text-sm ${p.english ? 'text-blue-700' : 'text-orange-400 italic'}`}>
+                    <td className={`py-2 px-2 ${p.english ? 'text-blue-700' : 'text-orange-400 italic'}`}>
                       {p.english || '未翻訳'}
                     </td>
                     <td className="py-2 px-1">
