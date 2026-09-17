@@ -29,6 +29,23 @@ export default function HomePage() {
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
 
+  // Load saved collect list from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem('golden-note-collect');
+    if (saved) {
+      try { setCollectList(JSON.parse(saved)); } catch {}
+    }
+  }, []);
+
+  // Save collect list to localStorage whenever it changes
+  useEffect(() => {
+    if (collectList.length > 0) {
+      localStorage.setItem('golden-note-collect', JSON.stringify(collectList));
+    } else {
+      localStorage.removeItem('golden-note-collect');
+    }
+  }, [collectList]);
+
   useEffect(() => {
     const unsub = onAuthChange(async (u) => {
       if (!u) { router.push('/login'); return; }
@@ -76,6 +93,7 @@ export default function HomePage() {
   };
 
   const handleBulkTranslate = async () => {
+    if (collectList.length === 0) { showToast('📝 リストにフレーズがありません。先にフレーズを追加してください。'); return; }
     const untranslated = collectList.filter(p => (p.japanese && !p.english) || (!p.japanese && p.english));
     if (untranslated.length === 0) { showToast('翻訳が必要なフレーズがありません'); return; }
     setTranslateLoading(true);
@@ -101,29 +119,19 @@ export default function HomePage() {
     showToast('翻訳完了！');
   };
 
-  const handleCreateBatch = async () => {
-    if (!user || collectList.length === 0) return;
-    const phrases = collectList.map(p => ({ japanese: p.japanese, english: p.english, situation: p.situation }));
-    try {
-      const batchId = await createBatch(user.uid, phrases);
-      for (const p of phrases) {
-        await addPhrase(user.uid, { japanese: p.japanese, english: p.english, situation: p.situation });
-      }
-      setCollectList([]);
-      const b = await getBatches(user.uid);
-      setBatches(b);
-      const allTranslated = phrases.every(p => p.japanese && p.english);
-      if (allTranslated) {
-        router.push(`/study/${batchId}`);
-      } else {
-        router.push(`/workshop?batchId=${batchId}`);
-      }
-    } catch (err: any) { showToast('バッチ作成エラー: ' + (err.message || '')); }
+  // Workshop: does NOT create a batch. Saves to localStorage and navigates.
+  const handleGoToWorkshop = () => {
+    if (collectList.length === 0) { showToast('📝 リストにフレーズがありません。先にフレーズを追加してください。'); return; }
+    // Save current list to localStorage for workshop to read
+    localStorage.setItem('golden-note-collect', JSON.stringify(collectList));
+    router.push('/workshop');
   };
 
-  const handleGoToWorkshop = async () => {
-    if (collectList.length === 0) { showToast('📝 リストにフレーズがありません。先にフレーズを追加してください。'); return; }
-    if (!user) return;
+  // Create batch: only when 25 phrases, all translated
+  const handleCreateBatch = async () => {
+    if (!user || collectList.length < 25) { showToast('25個のフレーズが必要です'); return; }
+    const allTranslated = collectList.every(p => p.japanese && p.english);
+    if (!allTranslated) { showToast('全てのフレーズに日英の翻訳が必要です'); return; }
     const phrases = collectList.map(p => ({ japanese: p.japanese, english: p.english, situation: p.situation }));
     try {
       const batchId = await createBatch(user.uid, phrases);
@@ -131,8 +139,11 @@ export default function HomePage() {
         await addPhrase(user.uid, { japanese: p.japanese, english: p.english, situation: p.situation });
       }
       setCollectList([]);
-      router.push(`/workshop?batchId=${batchId}`);
-    } catch (err: any) { showToast('エラー: ' + (err.message || '')); }
+      localStorage.removeItem('golden-note-collect');
+      const b = await getBatches(user.uid);
+      setBatches(b);
+      router.push(`/study/${batchId}`);
+    } catch (err: any) { showToast('バッチ作成エラー: ' + (err.message || '')); }
   };
 
   // Review items
@@ -196,7 +207,7 @@ export default function HomePage() {
         <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
           <div className="bg-blue-600 h-2 rounded-full transition-all" style={{ width: `${Math.min(100, (count / 25) * 100)}%` }} />
         </div>
-        <p className="text-sm text-gray-500 mb-4">あと {Math.max(0, 25 - count)} フレーズ必要</p>
+        <p className="text-sm text-gray-500 mb-4">あと <span className="font-bold text-blue-600">{Math.max(0, 25 - count)}</span> フレーズ必要</p>
 
         {/* Input */}
         <div className="bg-gray-50 rounded-xl p-4 mb-4 space-y-3">
@@ -230,46 +241,56 @@ export default function HomePage() {
           </button>
         </div>
 
-        {/* Workshop button - available with 1+ phrases */}
+        {/* Workshop button - always available with 1+ phrases, does NOT create batch */}
         {count >= 1 && (
-          <div className="flex gap-2 mb-4">
-            <button onClick={handleGoToWorkshop}
-              className="flex-1 bg-gradient-to-r from-purple-500 to-indigo-500 text-white px-4 py-3 rounded-lg font-bold text-sm">
-              🤖 AI翻訳ワークショップへ
-            </button>
-            {count >= 25 && collectList.every(p => p.japanese && p.english) && (
-              <button onClick={handleCreateBatch}
-                className="flex-1 bg-gradient-to-r from-amber-500 to-orange-500 text-white px-4 py-3 rounded-lg font-bold text-sm">
-                📖 学習開始
-              </button>
-            )}
-          </div>
+          <button onClick={handleGoToWorkshop}
+            className="w-full bg-gradient-to-r from-purple-500 to-indigo-500 text-white px-4 py-3 rounded-lg font-bold text-sm mb-3">
+            🤖 AI翻訳ワークショップへ
+          </button>
+        )}
+
+        {/* Create batch + start study - only when 25 phrases AND all translated */}
+        {count >= 25 && collectList.every(p => p.japanese && p.english) && (
+          <button onClick={handleCreateBatch}
+            className="w-full bg-gradient-to-r from-amber-500 to-orange-500 text-white px-4 py-3 rounded-lg font-bold text-sm mb-3">
+            📖 学習開始（ノートに登録）
+          </button>
         )}
 
         {/* Collected phrases list */}
         {collectList.length > 0 && (
           <div>
-            <h3 className="text-sm font-bold text-gray-500 mb-2">収集済みフレーズ</h3>
-            <div className="space-y-2">
-              {collectList.map((p, i) => (
-                <div key={i} className={`p-3 rounded-lg border ${p.isAI ? 'border-purple-200 bg-purple-50' : 'border-gray-200 bg-white'}`}>
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-gray-400 bg-gray-100 w-6 h-6 rounded-full flex items-center justify-center">{i + 1}</span>
-                        <span className="font-semibold text-sm">{p.japanese || <span className="text-gray-400 italic">（日本語なし）</span>}</span>
-                      </div>
-                      <p className={`text-sm ml-8 ${p.english ? 'text-blue-700' : 'text-orange-400 italic'}`}>
+            <h3 className="text-sm font-bold text-gray-500 mb-2 mt-4">収集済みフレーズ</h3>
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="bg-gray-50">
+                  <th className="p-2 text-left text-xs font-bold text-gray-500 border-b-2 border-gray-200 w-8">#</th>
+                  <th className="p-2 text-left text-xs font-bold text-gray-500 border-b-2 border-gray-200">日本語</th>
+                  <th className="p-2 text-left text-xs font-bold text-gray-500 border-b-2 border-gray-200">English</th>
+                  <th className="p-2 border-b-2 border-gray-200 w-8"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {collectList.map((p, i) => (
+                  <tr key={i} className={`border-b border-gray-100 hover:bg-gray-50 ${p.isAI ? 'bg-purple-50' : ''}`}>
+                    <td className="p-2 text-center text-gray-400 text-xs font-bold">{i + 1}</td>
+                    <td className="p-2">
+                      <div className="font-semibold text-sm">{p.japanese || <span className="text-gray-400 italic">（なし）</span>}</div>
+                      {p.situation && <div className="text-xs text-gray-400">📍 {p.situation}</div>}
+                      {p.isAI && <span className="text-xs bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded-full">✨ AI</span>}
+                    </td>
+                    <td className="p-2">
+                      <span className={`text-sm ${p.english ? 'text-blue-700' : 'text-orange-400 italic'}`}>
                         {p.english || '未翻訳'}
-                      </p>
-                      {p.situation && <p className="text-xs text-gray-400 ml-8">📍 {p.situation}</p>}
-                    </div>
-                    <button onClick={() => handleDelete(i)} className="text-gray-400 hover:text-red-500 text-lg ml-2">×</button>
-                  </div>
-                  {p.isAI && <span className="text-xs bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full ml-8">✨ AI提案</span>}
-                </div>
-              ))}
-            </div>
+                      </span>
+                    </td>
+                    <td className="p-2">
+                      <button onClick={() => handleDelete(i)} className="text-gray-400 hover:text-red-500 text-lg">×</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
