@@ -70,6 +70,33 @@ export async function deletePhrase(phraseId: string): Promise<void> {
   await deleteDoc(doc(db, 'phrases', phraseId));
 }
 
+// ============ Collecting (cross-device sync) ============
+
+interface CollectPhrase {
+  japanese: string;
+  english: string;
+  situation: string;
+  isAI?: boolean;
+}
+
+export async function getCollecting(userId: string): Promise<CollectPhrase[]> {
+  const docSnap = await getDoc(doc(db, 'collecting', userId));
+  if (!docSnap.exists()) return [];
+  const data = docSnap.data();
+  return data.phrases || [];
+}
+
+export async function saveCollecting(userId: string, phrases: CollectPhrase[]): Promise<void> {
+  await setDoc(doc(db, 'collecting', userId), {
+    phrases,
+    updatedAt: Timestamp.now(),
+  });
+}
+
+export async function clearCollecting(userId: string): Promise<void> {
+  await deleteDoc(doc(db, 'collecting', userId));
+}
+
 // ============ Batches ============
 
 export async function getBatches(userId: string): Promise<(Batch & { id: string })[]> {

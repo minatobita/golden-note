@@ -231,9 +231,64 @@ function WorkshopContent() {
     if (selectedIdx >= updated.length) {
       setSelectedIdx(Math.max(0, updated.length - 1));
     }
-    if (updated.length === 0) {
-      router.push('/');
-    }
+  };
+
+  // Render message with clickable candidates
+  const renderMessage = (content: string) => {
+    const { text, candidates } = parseCandidates(content);
+
+    // Split text into lines for rendering
+    const lines = text.split('\n');
+
+    return (
+      <div>
+        {lines.map((line, i) => {
+          // Check if this line is a numbered candidate
+          const numMatch = line.match(/^\d+[\.\)]\s*(.+)$/);
+          if (numMatch) {
+            const candidateText = numMatch[1].trim().replace(/^["']|["']$/g, '');
+            if (candidateText.length > 5 && /[a-zA-Z]/.test(candidateText)) {
+              return (
+                <div key={i} className="my-1">
+                  <button
+                    onClick={() => handleAdoptCandidate(candidateText)}
+                    className="text-left w-full px-3 py-2 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors text-sm"
+                  >
+                    <span className="text-purple-600 font-semibold">{line.match(/^\d+[\.\)]/)?.[0]} </span>
+                    <span className="text-gray-800">{candidateText}</span>
+                    <span className="ml-2 text-xs text-purple-400">← タップで採用</span>
+                  </button>
+                </div>
+              );
+            }
+          }
+
+          // Check for bold text that's a candidate
+          if (line.includes('**') || line.includes('__')) {
+            // Already cleaned, check if the cleaned version has a candidate
+          }
+
+          return <p key={i} className={`${line === '' ? 'h-2' : ''}`}>{line}</p>;
+        })}
+
+        {/* Show standalone candidate buttons for bold-extracted ones not in numbered list */}
+        {candidates.filter(c => !text.includes(`1.`) && !text.includes(`1)`)).length > 0 && 
+         !text.match(/^\d+[\.\)]/m) && candidates.length > 0 && (
+          <div className="mt-2 space-y-1">
+            {candidates.map((c, i) => (
+              <button
+                key={i}
+                onClick={() => handleAdoptCandidate(c)}
+                className="block w-full text-left px-3 py-2 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors text-sm"
+              >
+                💡 <span className="text-gray-800">{c}</span>
+                <span className="ml-2 text-xs text-purple-400">← タップで採用</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
   };
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-gray-500">読み込み中...</div>;
@@ -242,134 +297,90 @@ function WorkshopContent() {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-8 text-center">
         <div className="text-6xl mb-4">📝</div>
-        <p className="text-gray-500 mb-6">リストがありません。先にホーム画面でフレーズを集めてください。</p>
-        <button onClick={() => router.push('/')} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-bold">
-          🏠 ホームに戻る
-        </button>
+        <p className="text-gray-500 mb-4">リストがありません。先にホーム画面でフレーズを集めてください。</p>
+        <button onClick={() => router.push('/')} className="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold">🏠 ホームに戻る</button>
       </div>
     );
   }
 
-  const selectedPhrase = phrases[selectedIdx];
-  const translatedCount = phrases.filter(p => p.japanese && p.english).length;
+  const currentPhrase = phrases[selectedIdx];
 
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white border-b px-4 py-3 flex items-center justify-between">
+      <div className="bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between">
         <button onClick={() => router.push('/')} className="text-blue-600 font-semibold text-sm">← ホームに戻る</button>
-        <h1 className="font-bold text-sm">🤖 AI翻訳ワークショップ</h1>
-        <span className="text-xs text-gray-500">{translatedCount}/{phrases.length} 完了</span>
+        <span className="text-sm text-gray-500">
+          {phrases.filter(p => p.english).length} / {phrases.length} 翻訳完了
+        </span>
       </div>
 
-      <div className="flex h-[calc(100vh-52px)]">
-        {/* Left panel - phrase list */}
-        <div className="w-72 bg-white border-r overflow-y-auto flex-shrink-0">
+      <div className="flex h-[calc(100vh-50px)]">
+        {/* Left: Phrase list */}
+        <div className="w-72 bg-white border-r border-gray-200 overflow-y-auto flex-shrink-0">
           {phrases.map((p, i) => (
-            <div
-              key={i}
+            <div key={i}
               onClick={() => setSelectedIdx(i)}
-              className={`relative p-3 border-b cursor-pointer transition-colors group ${
-                i === selectedIdx ? 'bg-purple-50 border-l-4 border-l-purple-500' : 'hover:bg-gray-50 border-l-4 border-l-transparent'
-              }`}
+              className={`p-3 border-b border-gray-100 cursor-pointer transition-colors relative group
+                ${i === selectedIdx ? 'bg-blue-50 border-l-4 border-l-blue-600' : 'hover:bg-gray-50 border-l-4 border-l-transparent'}`}
             >
-              <div className="pr-6">
-                <p className="font-semibold text-sm truncate">{p.japanese || p.english || '（空）'}</p>
-                <p className="text-xs text-gray-500 truncate">{p.english || '未翻訳'}</p>
-                {p.japanese && p.english ? (
-                  <span className="text-xs text-green-600 font-bold">✅ 完了</span>
-                ) : (
-                  <span className="text-xs text-orange-500">⏳ 未翻訳</span>
-                )}
-              </div>
+              <div className="font-semibold text-sm truncate">{p.japanese || p.english || '（空）'}</div>
+              <div className="text-xs text-gray-500 truncate">{p.english || '未翻訳'}</div>
+              {p.english && <span className="text-xs text-green-600">✅ 完了</span>}
+              {/* Delete button */}
               <button
                 onClick={(e) => { e.stopPropagation(); handleDeletePhrase(i); }}
-                className="absolute top-2 right-2 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                🗑️
-              </button>
+                className="absolute right-2 top-2 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+              >🗑️</button>
             </div>
           ))}
         </div>
 
-        {/* Right panel - chat */}
+        {/* Right: Chat */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* Chat header */}
-          <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white p-4">
-            <h2 className="font-bold text-sm">🤖 AI翻訳アシスタント — あなたのスタイルに最適化</h2>
-            <p className="text-xs text-purple-200 mt-1">{selectedPhrase?.japanese || selectedPhrase?.english}</p>
+          <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-4 py-3">
+            <div className="font-bold text-sm">🤖 AI翻訳アシスタント — あなたのスタイルに最適化</div>
+            <div className="text-xs text-purple-200 truncate">{currentPhrase?.japanese || currentPhrase?.english}</div>
           </div>
 
-          {/* Chat messages */}
+          {/* Chat body */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {chatMessages.map((msg, i) => {
-              const isUser = msg.role === 'user';
-              const { text, candidates } = isUser ? { text: msg.content, candidates: [] } : parseCandidates(msg.content);
-
-              return (
-                <div key={i} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[80%] ${isUser ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200'} rounded-xl p-3 shadow-sm`}>
-                    {!isUser && <p className="text-xs text-purple-600 font-bold mb-1">🤖 AI翻訳アシスタント</p>}
-                    {isUser && <p className="text-xs text-blue-200 font-bold mb-1">👤 あなた</p>}
-                    <div className="text-sm whitespace-pre-wrap">
-                      {isUser ? msg.content : (
-                        <>
-                          {/* Render text, replacing numbered lines and bold with buttons */}
-                          {text.split('\n').map((line, li) => {
-                            // Check if this line is a numbered candidate
-                            const numMatch = line.match(/^\d+[\.\)]\s*(.+)$/);
-                            if (numMatch) {
-                              const candidateText = numMatch[1].trim().replace(/^["']|["']$/g, '');
-                              if (candidateText.length > 5 && /[a-zA-Z]/.test(candidateText)) {
-                                return (
-                                  <button
-                                    key={li}
-                                    onClick={() => handleAdoptCandidate(candidateText)}
-                                    className="block w-full text-left my-1 p-2 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors text-purple-800 font-medium text-sm"
-                                  >
-                                    {line}
-                                  </button>
-                                );
-                              }
-                            }
-                            return <p key={li}>{line}</p>;
-                          })}
-                          {/* Show bold candidates as buttons if no numbered ones */}
-                          {candidates.length > 0 && !text.match(/^\d+[\.\)]/m) && candidates.map((c, ci) => (
-                            <button
-                              key={ci}
-                              onClick={() => handleAdoptCandidate(c)}
-                              className="block w-full text-left my-1 p-2 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors text-purple-800 font-medium text-sm"
-                            >
-                              💡 {c}
-                            </button>
-                          ))}
-                        </>
-                      )}
+            {chatMessages.map((m, i) => (
+              <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[85%] ${m.role === 'user' ? 'bg-blue-600 text-white rounded-2xl rounded-br-md px-4 py-2' : ''}`}>
+                  {m.role === 'assistant' ? (
+                    <div>
+                      <div className="text-xs text-purple-600 font-bold mb-1">🤖 AI翻訳アシスタント</div>
+                      <div className="bg-purple-50 border border-purple-200 rounded-2xl rounded-bl-md px-4 py-3 text-sm leading-relaxed">
+                        {renderMessage(m.content)}
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div>
+                      <div className="text-xs text-blue-200 font-bold mb-1">👤 あなた</div>
+                      <div className="text-sm">{m.content}</div>
+                    </div>
+                  )}
                 </div>
-              );
-            })}
+              </div>
+            ))}
             {chatLoading && (
               <div className="flex justify-start">
-                <div className="bg-white border border-gray-200 rounded-xl p-3 shadow-sm">
-                  <p className="text-sm text-gray-400">🤖 考え中...</p>
+                <div className="bg-purple-50 border border-purple-200 rounded-2xl px-4 py-3 text-sm text-gray-500">
+                  考え中...
                 </div>
               </div>
             )}
             <div ref={chatEndRef} />
           </div>
 
-          {/* Quick buttons + input */}
-          <div className="border-t bg-white p-3">
-            <div className="flex flex-wrap gap-2 mb-3">
-              {['I主語にして', 'カジュアルに', '句動詞で', '短く', '別の言い方を3つ提案して', 'フォーマルに', '文法を説明して'].map(btn => (
-                <button
-                  key={btn}
-                  onClick={() => handleQuickButton(btn)}
-                  className="px-3 py-1.5 border-2 border-purple-400 text-purple-600 rounded-full text-xs font-bold hover:bg-purple-50 transition-colors"
-                >
+          {/* Quick buttons */}
+          <div className="px-4 py-2 border-t border-gray-200 bg-white">
+            <div className="flex gap-2 flex-wrap mb-2">
+              {['I主語にして', 'カジュアルに', '句動詞で', '短く', '別の言い方', 'フォーマルに', '文法を説明して'].map(btn => (
+                <button key={btn} onClick={() => handleQuickButton(btn)}
+                  className="px-3 py-1.5 border border-purple-300 rounded-full text-xs font-semibold text-purple-600 hover:bg-purple-50 transition-colors">
                   {btn}
                 </button>
               ))}
@@ -381,17 +392,13 @@ function WorkshopContent() {
                 onChange={e => setChatInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleChat(chatInput)}
                 placeholder="要望を入力..."
-                className="flex-1 p-3 border border-gray-300 rounded-lg text-sm"
+                className="flex-1 p-2.5 border border-gray-300 rounded-lg text-sm"
                 style={{ fontSize: '16px' }}
               />
               <button onClick={() => handleChat(chatInput)} disabled={chatLoading}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold text-sm disabled:opacity-50">
-                送信
-              </button>
+                className="bg-blue-600 text-white px-4 py-2.5 rounded-lg font-bold text-sm disabled:opacity-50">送信</button>
               <button onClick={handleAdopt}
-                className="bg-green-600 text-white px-4 py-2 rounded-lg font-bold text-sm">
-                ✅ 採用
-              </button>
+                className="bg-green-600 text-white px-4 py-2.5 rounded-lg font-bold text-sm">✅ 採用</button>
             </div>
           </div>
         </div>

@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { onAuthChange, signOut } from '@/lib/auth';
-import { seedIfNeeded, getPhrases, addPhrase, deletePhrase, getBatches, createBatch, updateBatch } from '@/lib/db';
+import { seedIfNeeded, getPhrases, addPhrase, deletePhrase, getBatches, createBatch, updateBatch, getCollecting, saveCollecting, clearCollecting } from '@/lib/db';
 import { STAGE_CONFIG } from '@/lib/types';
 import Navbar from '@/components/Navbar';
 
@@ -29,23 +29,7 @@ export default function HomePage() {
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
 
-  // Load saved collect list from localStorage
-  useEffect(() => {
-    const saved = localStorage.getItem('golden-note-collect');
-    if (saved) {
-      try { setCollectList(JSON.parse(saved)); } catch {}
-    }
-  }, []);
-
-  // Save collect list to localStorage whenever it changes
-  useEffect(() => {
-    if (collectList.length > 0) {
-      localStorage.setItem('golden-note-collect', JSON.stringify(collectList));
-    } else {
-      localStorage.removeItem('golden-note-collect');
-    }
-  }, [collectList]);
-
+  // Load from Firestore on auth
   useEffect(() => {
     const unsub = onAuthChange(async (u) => {
       if (!u) { router.push('/login'); return; }
@@ -54,11 +38,42 @@ export default function HomePage() {
         await seedIfNeeded(u.uid);
         const b = await getBatches(u.uid);
         setBatches(b);
+        // Load collecting phrases from Firestore
+        const collecting = await getCollecting(u.uid);
+        if (collecting.length > 0) {
+          setCollectList(collecting);
+        } else {
+          // Migrate from localStorage if exists
+          const saved = localStorage.getItem('golden-note-collect');
+          if (saved) {
+            try {
+              const parsed = JSON.parse(saved);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                setCollectList(parsed);
+                await saveCollecting(u.uid, parsed);
+                localStorage.removeItem('golden-note-collect');
+              }
+            } catch {}
+          }
+        }
       } catch (err) { console.error(err); }
       setLoading(false);
     });
     return () => unsub();
   }, []);
+
+  // Save to Firestore whenever collectList changes (after initial load)
+  useEffect(() => {
+    if (!user || loading) return;
+    if (collectList.length > 0) {
+      saveCollecting(user.uid, collectList).catch(console.error);
+      // Also keep localStorage as backup for workshop
+      localStorage.setItem('golden-note-collect', JSON.stringify(collectList));
+    } else {
+      clearCollecting(user.uid).catch(console.error);
+      localStorage.removeItem('golden-note-collect');
+    }
+  }, [collectList, user, loading]);
 
   const handleAdd = () => {
     if (!jp && !en) { showToast('日本語または英語を入力してください'); return; }
@@ -241,50 +256,52 @@ export default function HomePage() {
           </button>
         </div>
 
-        {/* Workshop button - always available with 1+ phrases, does NOT create batch */}
+        {/* Workshop button - available with 1+ phrases */}
         {count >= 1 && (
-          <button onClick={handleGoToWorkshop}
-            className="w-full bg-gradient-to-r from-purple-500 to-indigo-500 text-white px-4 py-3 rounded-lg font-bold text-sm mb-3">
-            🤖 AI翻訳ワークショップへ
-          </button>
+          <div className="flex gap-2 mb-4">
+            <button onClick={handleGoToWorkshop}
+              className="flex-1 bg-gradient-to-r from-purple-500 to-indigo-500 text-white px-4 py-3 rounded-lg font-bold text-sm">
+              🤖 AI翻訳ワークショップへ
+            </button>
+          </div>
         )}
 
-        {/* Create batch + start study - only when 25 phrases AND all translated */}
+        {/* Create batch button - only at 25 with all translated */}
         {count >= 25 && collectList.every(p => p.japanese && p.english) && (
-          <button onClick={handleCreateBatch}
-            className="w-full bg-gradient-to-r from-amber-500 to-orange-500 text-white px-4 py-3 rounded-lg font-bold text-sm mb-3">
-            📖 学習開始（ノートに登録）
-          </button>
+          <div className="mb-4">
+            <button onClick={handleCreateBatch}
+              className="w-full bg-gradient-to-r from-amber-500 to-orange-500 text-white px-4 py-3 rounded-lg font-bold text-sm">
+              📖 バッチ作成して学習開始！
+            </button>
+          </div>
         )}
 
-        {/* Collected phrases list */}
+        {/* Collected phrases table */}
         {collectList.length > 0 && (
           <div>
-            <h3 className="text-sm font-bold text-gray-500 mb-2 mt-4">収集済みフレーズ</h3>
-            <table className="w-full border-collapse text-sm">
+            <h3 className="text-sm font-bold text-gray-500 mb-2">収集済みフレーズ</h3>
+            <table className="w-full text-sm">
               <thead>
-                <tr className="bg-gray-50">
-                  <th className="p-2 text-left text-xs font-bold text-gray-500 border-b-2 border-gray-200 w-8">#</th>
-                  <th className="p-2 text-left text-xs font-bold text-gray-500 border-b-2 border-gray-200">日本語</th>
-                  <th className="p-2 text-left text-xs font-bold text-gray-500 border-b-2 border-gray-200">English</th>
-                  <th className="p-2 border-b-2 border-gray-200 w-8"></th>
+                <tr className="border-b-2 border-gray-200">
+                  <th className="text-left py-2 px-1 text-xs text-gray-400 w-8">#</th>
+                  <th className="text-left py-2 px-1 text-xs text-gray-400">日本語</th>
+                  <th className="text-left py-2 px-1 text-xs text-gray-400">English</th>
+                  <th className="w-8"></th>
                 </tr>
               </thead>
               <tbody>
                 {collectList.map((p, i) => (
-                  <tr key={i} className={`border-b border-gray-100 hover:bg-gray-50 ${p.isAI ? 'bg-purple-50' : ''}`}>
-                    <td className="p-2 text-center text-gray-400 text-xs font-bold">{i + 1}</td>
-                    <td className="p-2">
+                  <tr key={i} className={`border-b border-gray-100 ${p.isAI ? 'bg-purple-50' : ''}`}>
+                    <td className="py-2 px-1 text-xs text-gray-400 align-top">{i + 1}</td>
+                    <td className="py-2 px-1 align-top">
                       <div className="font-semibold text-sm">{p.japanese || <span className="text-gray-400 italic">（なし）</span>}</div>
                       {p.situation && <div className="text-xs text-gray-400">📍 {p.situation}</div>}
                       {p.isAI && <span className="text-xs bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded-full">✨ AI</span>}
                     </td>
-                    <td className="p-2">
-                      <span className={`text-sm ${p.english ? 'text-blue-700' : 'text-orange-400 italic'}`}>
-                        {p.english || '未翻訳'}
-                      </span>
+                    <td className={`py-2 px-1 align-top text-sm ${p.english ? 'text-blue-700' : 'text-orange-400 italic'}`}>
+                      {p.english || '未翻訳'}
                     </td>
-                    <td className="p-2">
+                    <td className="py-2 px-1 align-top">
                       <button onClick={() => handleDelete(i)} className="text-gray-400 hover:text-red-500 text-lg">×</button>
                     </td>
                   </tr>
