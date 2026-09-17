@@ -49,38 +49,44 @@ function WorkshopContent() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
+  // Determine translation direction for a phrase
+  const getDirection = (p: CollectPhrase): 'jp2en' | 'en2jp' | 'both' | 'empty' => {
+    if (p.japanese && !p.english) return 'jp2en';
+    if (!p.japanese && p.english) return 'en2jp';
+    if (p.japanese && p.english) return 'both';
+    return 'empty';
+  };
+
   // When selecting a phrase, start chat
   useEffect(() => {
     if (phrases.length === 0) return;
     const p = phrases[selectedIdx];
     if (!p) return;
-    const initialMsg: { role: string; content: string }[] = [];
-    if (p.japanese && !p.english) {
-      initialMsg.push({
+    const direction = getDirection(p);
+
+    if (direction === 'jp2en') {
+      setChatMessages([{
         role: 'assistant',
         content: `「${p.japanese}」の英訳を考えましょう。${p.situation ? `\n📍 状況: ${p.situation}` : ''}\n\nあなたのスタイル（I主語・カジュアル・句動詞）に合わせて提案します。少々お待ちください...`,
-      });
-      setChatMessages(initialMsg);
-      autoTranslate(p);
-    } else if (p.english && !p.japanese) {
-      initialMsg.push({
+      }]);
+      autoTranslateJpToEn(p);
+    } else if (direction === 'en2jp') {
+      setChatMessages([{
         role: 'assistant',
         content: `「${p.english}」の日本語訳を考えましょう。少々お待ちください...`,
-      });
-      setChatMessages(initialMsg);
-      autoTranslateReverse(p);
-    } else if (p.japanese && p.english) {
-      initialMsg.push({
+      }]);
+      autoTranslateEnToJp(p);
+    } else if (direction === 'both') {
+      setChatMessages([{
         role: 'assistant',
         content: `「${p.japanese}」\n現在の英訳: ${p.english}\n\nこの翻訳を調整しますか？クイックボタンを使うか、自由にリクエストしてください。`,
-      });
-      setChatMessages(initialMsg);
+      }]);
     } else {
       setChatMessages([{ role: 'assistant', content: 'フレーズを入力してから翻訳を始めましょう。' }]);
     }
   }, [selectedIdx]);
 
-  const autoTranslate = async (p: CollectPhrase) => {
+  const autoTranslateJpToEn = async (p: CollectPhrase) => {
     try {
       const res = await fetch('/api/translate', {
         method: 'POST',
@@ -99,7 +105,7 @@ function WorkshopContent() {
     }
   };
 
-  const autoTranslateReverse = async (p: CollectPhrase) => {
+  const autoTranslateEnToJp = async (p: CollectPhrase) => {
     try {
       const res = await fetch('/api/translate', {
         method: 'POST',
@@ -165,7 +171,7 @@ function WorkshopContent() {
     let match;
     while ((match = numberedRegex.exec(content)) !== null) {
       const candidate = match[1].trim().replace(/^["']|["']$/g, '');
-      if (candidate.length > 5 && /[a-zA-Z]/.test(candidate)) {
+      if (candidate.length > 3) {
         candidates.push(candidate);
       }
     }
@@ -174,7 +180,7 @@ function WorkshopContent() {
     const boldRegex = /\*\*(.+?)\*\*/g;
     while ((match = boldRegex.exec(content)) !== null) {
       const candidate = match[1].trim().replace(/^["']|["']$/g, '');
-      if (candidate.length > 5 && /[a-zA-Z]/.test(candidate) && !candidates.includes(candidate)) {
+      if (candidate.length > 3 && !candidates.includes(candidate)) {
         candidates.push(candidate);
       }
     }
@@ -188,11 +194,13 @@ function WorkshopContent() {
   const handleAdoptCandidate = (candidate: string) => {
     const updated = [...phrases];
     const p = updated[selectedIdx];
-    if (p.japanese && !p.english) {
-      updated[selectedIdx] = { ...p, english: candidate };
-    } else if (!p.japanese && p.english) {
+    const direction = getDirection(p);
+
+    if (direction === 'en2jp') {
+      // English exists, no Japanese → adopt as Japanese
       updated[selectedIdx] = { ...p, japanese: candidate };
     } else {
+      // Default: adopt as English
       updated[selectedIdx] = { ...p, english: candidate };
     }
     setPhrases(updated);
@@ -200,7 +208,7 @@ function WorkshopContent() {
   };
 
   const handleAdopt = () => {
-    // Find the last English text in assistant messages
+    // Find the last English/Japanese text in assistant messages
     const assistantMsgs = chatMessages.filter(m => m.role === 'assistant');
     if (assistantMsgs.length === 0) return;
     
@@ -211,7 +219,6 @@ function WorkshopContent() {
     if (candidates.length > 0) {
       adopted = candidates[0];
     } else {
-      // Fallback: extract from bold or use first line
       const boldMatch = lastMsg.match(/\*\*(.+?)\*\*/);
       const numberedMatch = lastMsg.match(/\d+[\.\)]\s*(.+)/);
       if (boldMatch) adopted = boldMatch[1];
@@ -237,56 +244,37 @@ function WorkshopContent() {
   const renderMessage = (content: string) => {
     const { text, candidates } = parseCandidates(content);
 
-    // Split text into lines for rendering
-    const lines = text.split('\n');
+    if (candidates.length === 0) {
+      return <div className="whitespace-pre-wrap">{text}</div>;
+    }
+
+    // Remove candidate lines from text for cleaner display
+    let cleanedText = text;
+    candidates.forEach(c => {
+      cleanedText = cleanedText.replace(new RegExp(`\\d+[\\.\\)]\\s*${c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g'), '');
+      cleanedText = cleanedText.replace(c, '');
+    });
+    // Clean up extra newlines
+    cleanedText = cleanedText.replace(/\n{3,}/g, '\n\n').trim();
 
     return (
       <div>
-        {lines.map((line, i) => {
-          // Check if this line is a numbered candidate
-          const numMatch = line.match(/^\d+[\.\)]\s*(.+)$/);
-          if (numMatch) {
-            const candidateText = numMatch[1].trim().replace(/^["']|["']$/g, '');
-            if (candidateText.length > 5 && /[a-zA-Z]/.test(candidateText)) {
-              return (
-                <div key={i} className="my-1">
-                  <button
-                    onClick={() => handleAdoptCandidate(candidateText)}
-                    className="text-left w-full px-3 py-2 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors text-sm"
-                  >
-                    <span className="text-purple-600 font-semibold">{line.match(/^\d+[\.\)]/)?.[0]} </span>
-                    <span className="text-gray-800">{candidateText}</span>
-                    <span className="ml-2 text-xs text-purple-400">← タップで採用</span>
-                  </button>
-                </div>
-              );
-            }
-          }
-
-          // Check for bold text that's a candidate
-          if (line.includes('**') || line.includes('__')) {
-            // Already cleaned, check if the cleaned version has a candidate
-          }
-
-          return <p key={i} className={`${line === '' ? 'h-2' : ''}`}>{line}</p>;
-        })}
-
-        {/* Show standalone candidate buttons for bold-extracted ones not in numbered list */}
-        {candidates.filter(c => !text.includes(`1.`) && !text.includes(`1)`)).length > 0 && 
-         !text.match(/^\d+[\.\)]/m) && candidates.length > 0 && (
-          <div className="mt-2 space-y-1">
-            {candidates.map((c, i) => (
-              <button
-                key={i}
-                onClick={() => handleAdoptCandidate(c)}
-                className="block w-full text-left px-3 py-2 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors text-sm"
-              >
-                💡 <span className="text-gray-800">{c}</span>
-                <span className="ml-2 text-xs text-purple-400">← タップで採用</span>
-              </button>
-            ))}
-          </div>
-        )}
+        {cleanedText && <div className="whitespace-pre-wrap mb-3">{cleanedText}</div>}
+        <div className="space-y-2">
+          {candidates.map((candidate, i) => (
+            <button
+              key={i}
+              onClick={() => handleAdoptCandidate(candidate)}
+              className="block w-full text-left p-3 bg-white border-2 border-purple-200 rounded-lg hover:border-purple-500 hover:bg-purple-50 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-purple-500 font-bold text-sm">{i + 1}.</span>
+                <span className="text-gray-900">{candidate}</span>
+              </div>
+              <span className="text-xs text-purple-400 ml-5">← クリックで採用</span>
+            </button>
+          ))}
+        </div>
       </div>
     );
   };
@@ -295,7 +283,7 @@ function WorkshopContent() {
 
   if (phrases.length === 0) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center p-8 text-center">
+      <div className="min-h-screen flex flex-col items-center justify-center p-4">
         <div className="text-6xl mb-4">📝</div>
         <p className="text-gray-500 mb-4">リストがありません。先にホーム画面でフレーズを集めてください。</p>
         <button onClick={() => router.push('/')} className="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold">🏠 ホームに戻る</button>
@@ -304,72 +292,87 @@ function WorkshopContent() {
   }
 
   const currentPhrase = phrases[selectedIdx];
+  const direction = currentPhrase ? getDirection(currentPhrase) : 'empty';
+  const doneCount = phrases.filter(p => p.japanese && p.english).length;
+
+  // Quick buttons based on direction
+  const quickButtons = direction === 'en2jp'
+    ? ['もっと自然な日本語に', 'カジュアルに', 'フォーマルに', '短く', '別の言い方', '文法を説明して']
+    : ['I主語にして', 'カジュアルに', '句動詞で', '短く', '別の言い方', 'フォーマルに', '文法を説明して'];
 
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between">
-        <button onClick={() => router.push('/')} className="text-blue-600 font-semibold text-sm">← ホームに戻る</button>
-        <span className="text-sm text-gray-500">
-          {phrases.filter(p => p.english).length} / {phrases.length} 翻訳完了
-        </span>
+      <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white p-3 flex justify-between items-center">
+        <button onClick={() => router.push('/')} className="text-sm bg-white/20 px-3 py-1 rounded-lg hover:bg-white/30">← ホームに戻る</button>
+        <span className="font-bold text-sm">🤖 AI翻訳ワークショップ</span>
+        <span className="text-sm">{doneCount}/{phrases.length} 完了</span>
       </div>
 
-      <div className="flex h-[calc(100vh-50px)]">
+      <div className="flex h-[calc(100vh-52px)]">
         {/* Left: Phrase list */}
-        <div className="w-72 bg-white border-r border-gray-200 overflow-y-auto flex-shrink-0">
-          {phrases.map((p, i) => (
-            <div key={i}
-              onClick={() => setSelectedIdx(i)}
-              className={`p-3 border-b border-gray-100 cursor-pointer transition-colors relative group
-                ${i === selectedIdx ? 'bg-blue-50 border-l-4 border-l-blue-600' : 'hover:bg-gray-50 border-l-4 border-l-transparent'}`}
-            >
-              <div className="font-semibold text-sm truncate">{p.japanese || p.english || '（空）'}</div>
-              <div className="text-xs text-gray-500 truncate">{p.english || '未翻訳'}</div>
-              {p.english && <span className="text-xs text-green-600">✅ 完了</span>}
-              {/* Delete button */}
-              <button
-                onClick={(e) => { e.stopPropagation(); handleDeletePhrase(i); }}
-                className="absolute right-2 top-2 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
-              >🗑️</button>
-            </div>
-          ))}
+        <div className="w-72 flex-shrink-0 bg-white border-r border-gray-200 overflow-y-auto">
+          {phrases.map((p, i) => {
+            const dir = getDirection(p);
+            const isDone = dir === 'both';
+            return (
+              <div key={i}
+                onClick={() => setSelectedIdx(i)}
+                className={`p-3 border-b border-gray-100 cursor-pointer transition-colors relative group
+                  ${i === selectedIdx ? 'bg-purple-100 border-l-4 border-l-purple-600' : 'hover:bg-gray-50 border-l-4 border-l-transparent'}
+                  ${isDone ? 'opacity-70' : ''}`}>
+                <div className="text-sm font-semibold truncate">
+                  {p.japanese || <span className="text-gray-400 italic">（日本語なし）</span>}
+                </div>
+                <div className="text-xs text-gray-500 truncate">
+                  {p.english || <span className="text-orange-400 italic">（英語なし）</span>}
+                </div>
+                {isDone && <span className="text-xs text-green-600">✅ 完了</span>}
+                {dir === 'jp2en' && <span className="text-xs text-blue-500">日→英</span>}
+                {dir === 'en2jp' && <span className="text-xs text-orange-500">英→日</span>}
+                {/* Delete button */}
+                <button onClick={(e) => { e.stopPropagation(); handleDeletePhrase(i); }}
+                  className="absolute top-2 right-2 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                  🗑️
+                </button>
+              </div>
+            );
+          })}
         </div>
 
         {/* Right: Chat */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* Chat header */}
-          <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-4 py-3">
+          <div className="bg-gradient-to-r from-purple-500 to-indigo-500 text-white p-3">
             <div className="font-bold text-sm">🤖 AI翻訳アシスタント — あなたのスタイルに最適化</div>
-            <div className="text-xs text-purple-200 truncate">{currentPhrase?.japanese || currentPhrase?.english}</div>
+            <div className="text-xs opacity-80 truncate">
+              {direction === 'jp2en' && `日→英: ${currentPhrase?.japanese}`}
+              {direction === 'en2jp' && `英→日: ${currentPhrase?.english}`}
+              {direction === 'both' && `${currentPhrase?.japanese} → ${currentPhrase?.english}`}
+            </div>
           </div>
 
           {/* Chat body */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {chatMessages.map((m, i) => (
-              <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[85%] ${m.role === 'user' ? 'bg-blue-600 text-white rounded-2xl rounded-br-md px-4 py-2' : ''}`}>
-                  {m.role === 'assistant' ? (
-                    <div>
-                      <div className="text-xs text-purple-600 font-bold mb-1">🤖 AI翻訳アシスタント</div>
-                      <div className="bg-purple-50 border border-purple-200 rounded-2xl rounded-bl-md px-4 py-3 text-sm leading-relaxed">
-                        {renderMessage(m.content)}
-                      </div>
-                    </div>
-                  ) : (
-                    <div>
-                      <div className="text-xs text-blue-200 font-bold mb-1">👤 あなた</div>
-                      <div className="text-sm">{m.content}</div>
-                    </div>
-                  )}
+            {chatMessages.map((msg, i) => (
+              <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[85%] ${msg.role === 'user' ? '' : ''}`}>
+                  <div className="text-xs font-bold mb-1" style={{ color: msg.role === 'user' ? '#2563EB' : '#7C3AED' }}>
+                    {msg.role === 'user' ? '🧑 あなた' : '🤖 AI翻訳アシスタント'}
+                  </div>
+                  <div className={`rounded-xl p-3 ${msg.role === 'user' ? 'bg-blue-600 text-white' : 'bg-purple-50 border border-purple-200'}`}>
+                    {msg.role === 'user' ? (
+                      <div className="whitespace-pre-wrap">{msg.content}</div>
+                    ) : (
+                      renderMessage(msg.content)
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
             {chatLoading && (
               <div className="flex justify-start">
-                <div className="bg-purple-50 border border-purple-200 rounded-2xl px-4 py-3 text-sm text-gray-500">
-                  考え中...
-                </div>
+                <div className="bg-purple-50 border border-purple-200 rounded-xl p-3 text-purple-500">考え中...</div>
               </div>
             )}
             <div ref={chatEndRef} />
@@ -378,27 +381,24 @@ function WorkshopContent() {
           {/* Quick buttons */}
           <div className="px-4 py-2 border-t border-gray-200 bg-white">
             <div className="flex gap-2 flex-wrap mb-2">
-              {['I主語にして', 'カジュアルに', '句動詞で', '短く', '別の言い方', 'フォーマルに', '文法を説明して'].map(btn => (
+              {quickButtons.map(btn => (
                 <button key={btn} onClick={() => handleQuickButton(btn)}
-                  className="px-3 py-1.5 border border-purple-300 rounded-full text-xs font-semibold text-purple-600 hover:bg-purple-50 transition-colors">
+                  className="px-3 py-1.5 border-2 border-purple-300 rounded-full text-xs font-bold text-purple-600 hover:bg-purple-50 transition-colors">
                   {btn}
                 </button>
               ))}
             </div>
+
+            {/* Chat input */}
             <div className="flex gap-2">
-              <input
-                type="text"
-                value={chatInput}
-                onChange={e => setChatInput(e.target.value)}
+              <input type="text" value={chatInput} onChange={e => setChatInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleChat(chatInput)}
                 placeholder="要望を入力..."
-                className="flex-1 p-2.5 border border-gray-300 rounded-lg text-sm"
-                style={{ fontSize: '16px' }}
-              />
+                className="flex-1 p-3 border border-gray-300 rounded-lg text-sm" style={{ fontSize: '16px' }} />
               <button onClick={() => handleChat(chatInput)} disabled={chatLoading}
-                className="bg-blue-600 text-white px-4 py-2.5 rounded-lg font-bold text-sm disabled:opacity-50">送信</button>
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold text-sm disabled:opacity-50">送信</button>
               <button onClick={handleAdopt}
-                className="bg-green-600 text-white px-4 py-2.5 rounded-lg font-bold text-sm">✅ 採用</button>
+                className="bg-green-600 text-white px-4 py-2 rounded-lg font-bold text-sm">✅ 採用</button>
             </div>
           </div>
         </div>
