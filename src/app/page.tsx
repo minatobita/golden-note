@@ -94,33 +94,6 @@ export default function HomePage() {
     setAiLoading(false);
   };
 
-  const handleBulkTranslate = async () => {
-    if (collectList.length === 0) { showToast('📝 リストにフレーズがありません。先にフレーズを追加してください。'); return; }
-    const untranslated = collectList.filter(p => (p.japanese && !p.english) || (!p.japanese && p.english));
-    if (untranslated.length === 0) { showToast('翻訳が必要なフレーズがありません'); return; }
-    setTranslateLoading(true);
-    const updated = [...collectList];
-    for (let i = 0; i < updated.length; i++) {
-      const p = updated[i];
-      if (p.japanese && !p.english) {
-        try {
-          const res = await fetch('/api/translate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ japanese: p.japanese, situation: p.situation }) });
-          const data = await res.json();
-          if (data.english) updated[i] = { ...p, english: data.english };
-        } catch {}
-      } else if (!p.japanese && p.english) {
-        try {
-          const res = await fetch('/api/translate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ english: p.english }) });
-          const data = await res.json();
-          if (data.japanese) updated[i] = { ...p, japanese: data.japanese };
-        } catch {}
-      }
-    }
-    setCollectList(updated);
-    setTranslateLoading(false);
-    showToast('翻訳完了！');
-  };
-
   // Workshop: does NOT create a batch. Saves to localStorage and navigates.
   const handleGoToWorkshop = () => {
     if (collectList.length === 0) { showToast('📝 リストにフレーズがありません。先にフレーズを追加してください。'); return; }
@@ -205,11 +178,13 @@ export default function HomePage() {
           <h2 className="text-lg font-bold">✏️ フレーズ収集</h2>
           <span className={`text-lg font-bold ${count >= 25 ? 'text-green-600' : 'text-blue-600'}`}>{count} / 25</span>
         </div>
+        {/* Progress bar */}
         <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
           <div className="bg-blue-600 h-2 rounded-full transition-all" style={{ width: `${Math.min(100, (count / 25) * 100)}%` }} />
         </div>
         <p className="text-sm text-gray-500 mb-4">あと {Math.max(0, 25 - count)} フレーズ必要</p>
 
+        {/* Input */}
         <div className="bg-gray-50 rounded-xl p-4 mb-4 space-y-3">
           <div>
             <label className="text-sm font-bold text-gray-700">日本語</label>
@@ -229,17 +204,15 @@ export default function HomePage() {
           <button onClick={handleAdd} className="w-full bg-blue-600 text-white p-3 rounded-lg font-bold text-base">＋ 追加</button>
         </div>
 
+        {/* Action buttons */}
         <div className="flex gap-2 flex-wrap mb-4">
           <button onClick={handleAIFill} disabled={aiLoading || count >= 25}
             className="flex-1 bg-gradient-to-r from-yellow-400 to-orange-400 text-white px-4 py-3 rounded-lg font-bold text-sm disabled:opacity-50">
             {aiLoading ? '生成中...' : '✨ AIで25個にする'}
           </button>
-          <button onClick={handleBulkTranslate} disabled={translateLoading || count === 0}
-            className="flex-1 bg-gradient-to-r from-green-500 to-teal-500 text-white px-4 py-3 rounded-lg font-bold text-sm disabled:opacity-50">
-            {translateLoading ? '翻訳中...' : '🤖 空欄を一括AI翻訳'}
-          </button>
         </div>
 
+        {/* Workshop button - available with 1+ phrases */}
         {count >= 1 && (
           <div className="flex gap-2 mb-4">
             <button onClick={handleGoToWorkshop}
@@ -255,6 +228,7 @@ export default function HomePage() {
           </div>
         )}
 
+        {/* Collected phrases table */}
         {collectList.length > 0 && (
           <div>
             <h3 className="text-sm font-bold text-gray-500 mb-2">収集済みフレーズ</h3>
@@ -270,16 +244,18 @@ export default function HomePage() {
               <tbody>
                 {collectList.map((p, i) => (
                   <tr key={i} className={`border-b border-gray-100 ${p.isAI ? 'bg-purple-50' : ''}`}>
-                    <td className="py-2 px-1 text-gray-400 text-xs">{i + 1}</td>
+                    <td className="py-2 px-1 text-gray-400 text-xs font-bold">{i + 1}</td>
                     <td className="py-2 px-2">
-                      <span className="font-semibold text-sm">{p.japanese || <span className="text-gray-400 italic">—</span>}</span>
+                      <span className="font-semibold">{p.japanese || <span className="text-gray-400 italic">—</span>}</span>
                       {p.situation && <p className="text-xs text-gray-400">📍 {p.situation}</p>}
-                      {p.isAI && <span className="text-xs bg-purple-100 text-purple-600 px-1 py-0.5 rounded">✨ AI</span>}
+                      {p.isAI && <span className="text-xs bg-purple-100 text-purple-600 px-1 rounded">✨ AI</span>}
                     </td>
-                    <td className={`py-2 px-2 text-sm ${p.english ? 'text-blue-700' : 'text-orange-400 italic'}`}>
-                      {p.english || '未翻訳'}
+                    <td className="py-2 px-2">
+                      <span className={p.english ? 'text-blue-700' : 'text-orange-400 italic'}>
+                        {p.english || '未翻訳'}
+                      </span>
                     </td>
-                    <td className="py-2">
+                    <td className="py-2 px-1">
                       <button onClick={() => handleDelete(i)} className="text-gray-400 hover:text-red-500">×</button>
                     </td>
                   </tr>
