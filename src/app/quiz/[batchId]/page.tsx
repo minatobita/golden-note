@@ -64,7 +64,7 @@ export default function QuizPage() {
 
     if (nextStage) {
       const nextConfig = STAGE_CONFIG[nextStage];
-      const intervalDays = settings.intervals?.[nextStage] || nextConfig?.defaultInterval || 7;
+      const intervalDays = settings.intervals?.[nextStage] || 7;
 
       // 次回復習日 = 今日（実際の復習日）+ 間隔日数
       const nextDate = new Date(today);
