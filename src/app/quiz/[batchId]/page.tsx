@@ -36,7 +36,6 @@ export default function QuizPage() {
   };
 
   const goToSelect = () => {
-    // Pre-select incorrect ones
     const preSelected = new Set<number>();
     quizResults.forEach((r, i) => { if (!r.correct) preSelected.add(i); });
     setSelectedIndices(preSelected);
@@ -54,17 +53,21 @@ export default function QuizPage() {
     const target = config.to;
     const selectedArr = Array.from(selectedIndices);
     const selectedPhrases = selectedArr.map(i => quizResults[i].phrase);
-    const overflowPhrases = selectedArr.length > target ? selectedPhrases.slice(target) : [];
     const nextPhrases = selectedPhrases.slice(0, target);
-    
+
     const settings = await getSettings(batch.userId);
     const nextStage = config.next;
 
+    // 今日の日付（実際の復習日）
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+
     if (nextStage) {
       const nextConfig = STAGE_CONFIG[nextStage];
-      const intervalKey = nextStage;
-      const intervalDays = settings.intervals?.[intervalKey] || 7;
-      const nextDate = new Date();
+      const intervalDays = settings.intervals?.[nextStage] || nextConfig?.defaultInterval || 7;
+
+      // 次回復習日 = 今日（実際の復習日）+ 間隔日数
+      const nextDate = new Date(today);
       nextDate.setDate(nextDate.getDate() + intervalDays);
 
       await updateBatch(batchId as string, {
@@ -74,15 +77,25 @@ export default function QuizPage() {
         targetCount: nextConfig?.to || 6,
         status: 'reviewing',
         nextReviewDate: nextDate.toISOString().split('T')[0],
-        lastReviewDate: new Date().toISOString().split('T')[0],
+        lastReviewDate: todayStr,
         intervalDays,
-        reviewHistory: [...(batch.reviewHistory || []), { date: new Date().toISOString(), stage: batch.stage, selected: selectedArr.length }],
+        reviewHistory: [...(batch.reviewHistory || []), {
+          date: today.toISOString(),
+          stage: batch.stage,
+          selected: selectedArr.length,
+          actualReviewDate: todayStr,
+        }],
       });
     } else {
-      // Final stage - complete
       await updateBatch(batchId as string, {
         status: 'completed',
-        reviewHistory: [...(batch.reviewHistory || []), { date: new Date().toISOString(), stage: batch.stage, selected: selectedArr.length }],
+        lastReviewDate: todayStr,
+        reviewHistory: [...(batch.reviewHistory || []), {
+          date: today.toISOString(),
+          stage: batch.stage,
+          selected: selectedArr.length,
+          actualReviewDate: todayStr,
+        }],
       });
     }
 
@@ -172,7 +185,8 @@ export default function QuizPage() {
       <div className="space-y-2 mb-6">
         {quizResults.map((r, i) => {
           const isSelected = selectedIndices.has(i);
-          const isOverflow = isSelected && Array.from(selectedIndices).indexOf(i) >= config.to;
+          const selectedArray = Array.from(selectedIndices);
+          const isOverflow = isSelected && selectedArray.indexOf(i) >= config.to;
           return (
             <div key={i} onClick={() => toggleSelect(i)}
               className={`p-3 rounded-lg border-2 cursor-pointer transition-colors ${

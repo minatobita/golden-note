@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { onAuthChange } from '@/lib/auth';
-import { getBatches } from '@/lib/db';
+import { getBatches, updateBatch } from '@/lib/db';
 import { STAGE_CONFIG } from '@/lib/types';
 import Navbar from '@/components/Navbar';
 
@@ -12,6 +12,10 @@ export default function NotesPage() {
   const [batches, setBatches] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedBatch, setExpandedBatch] = useState<string | null>(null);
+  const [editingPhrase, setEditingPhrase] = useState<{ batchId: string; idx: number } | null>(null);
+  const [editJp, setEditJp] = useState('');
+  const [editEn, setEditEn] = useState('');
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const unsub = onAuthChange(async (u) => {
@@ -71,6 +75,43 @@ export default function NotesPage() {
       }
     }
     return null;
+  };
+
+  const startEdit = (batchId: string, idx: number, jp: string, en: string) => {
+    setEditingPhrase({ batchId, idx });
+    setEditJp(jp);
+    setEditEn(en);
+  };
+
+  const cancelEdit = () => {
+    setEditingPhrase(null);
+    setEditJp('');
+    setEditEn('');
+  };
+
+  const saveEdit = async () => {
+    if (!editingPhrase) return;
+    setSaving(true);
+    try {
+      const batch = batches.find(b => b.id === editingPhrase.batchId);
+      if (!batch || !batch.phrases) return;
+      const updatedPhrases = [...batch.phrases];
+      updatedPhrases[editingPhrase.idx] = {
+        ...updatedPhrases[editingPhrase.idx],
+        japanese: editJp,
+        english: editEn,
+      };
+      await updateBatch(editingPhrase.batchId, { phrases: updatedPhrases });
+      // Update local state
+      setBatches(prev => prev.map(b =>
+        b.id === editingPhrase.batchId ? { ...b, phrases: updatedPhrases } : b
+      ));
+      cancelEdit();
+    } catch (err) {
+      console.error(err);
+      alert('保存に失敗しました');
+    }
+    setSaving(false);
   };
 
   const speak = (text: string) => {
@@ -161,18 +202,74 @@ export default function NotesPage() {
                           <span className="text-xs font-bold text-gray-400 bg-gray-200 w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
                             {i + 1}
                           </span>
-                          <div className="flex-1 min-w-0">
-                            <p className="font-semibold text-sm">{p.japanese || '（日本語なし）'}</p>
-                            <p className="text-sm text-blue-700">{p.english || '（英語なし）'}</p>
-                            {p.situation && <p className="text-xs text-gray-400">📍 {p.situation}</p>}
-                          </div>
-                          {p.english && (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); speak(p.english); }}
-                              className="text-lg flex-shrink-0"
-                            >
-                              🔊
-                            </button>
+
+                          {editingPhrase?.batchId === batch.id && editingPhrase?.idx === i ? (
+                            /* Edit mode */
+                            <div className="flex-1 space-y-2">
+                              <div>
+                                <label className="text-xs font-bold text-gray-500">日本語</label>
+                                <input
+                                  type="text"
+                                  value={editJp}
+                                  onChange={e => setEditJp(e.target.value)}
+                                  className="w-full p-2 border border-blue-300 rounded text-sm"
+                                  style={{ fontSize: '16px' }}
+                                />
+                              </div>
+                              <div>
+                                <label className="text-xs font-bold text-gray-500">English</label>
+                                <input
+                                  type="text"
+                                  value={editEn}
+                                  onChange={e => setEditEn(e.target.value)}
+                                  className="w-full p-2 border border-blue-300 rounded text-sm"
+                                  style={{ fontSize: '16px' }}
+                                />
+                              </div>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={saveEdit}
+                                  disabled={saving}
+                                  className="bg-green-600 text-white px-3 py-1 rounded text-xs font-bold"
+                                >
+                                  {saving ? '保存中...' : '💾 保存'}
+                                </button>
+                                <button
+                                  onClick={cancelEdit}
+                                  className="bg-gray-300 text-gray-700 px-3 py-1 rounded text-xs font-bold"
+                                >
+                                  キャンセル
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            /* Display mode */
+                            <>
+                              <div className="flex-1 min-w-0">
+                                <p className="font-semibold text-sm">{p.japanese || '（日本語なし）'}</p>
+                                <p className="text-sm text-blue-700">{p.english || '（英語なし）'}</p>
+                                {p.situation && <p className="text-xs text-gray-400">📍 {p.situation}</p>}
+                              </div>
+                              <div className="flex items-center gap-1 flex-shrink-0">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    startEdit(batch.id, i, p.japanese || '', p.english || '');
+                                  }}
+                                  className="text-gray-400 hover:text-blue-500 text-sm"
+                                >
+                                  ✏️
+                                </button>
+                                {p.english && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); speak(p.english); }}
+                                    className="text-lg"
+                                  >
+                                    🔊
+                                  </button>
+                                )}
+                              </div>
+                            </>
                           )}
                         </div>
                       ))}
