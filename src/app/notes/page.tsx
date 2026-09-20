@@ -57,8 +57,11 @@ export default function NotesPage() {
   const formatDate = (dateStr: string | null | undefined) => {
     if (!dateStr) return null;
     try {
-      const d = new Date(dateStr);
-      return `${d.getFullYear()}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getDate().toString().padStart(2, '0')}`;
+      const parts = dateStr.split('-');
+      if (parts.length === 3) {
+        return `${parts[0]}/${parts[1]}/${parts[2]}`;
+      }
+      return dateStr;
     } catch {
       return dateStr;
     }
@@ -68,7 +71,7 @@ export default function NotesPage() {
     if (batch.createdAt) {
       if (batch.createdAt.seconds) {
         const d = new Date(batch.createdAt.seconds * 1000);
-        return `${d.getFullYear()}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getDate().toString().padStart(2, '0')}`;
+        return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
       }
       if (typeof batch.createdAt === 'string') {
         return formatDate(batch.createdAt);
@@ -199,55 +202,49 @@ export default function NotesPage() {
                     <div className="space-y-2">
                       {batch.phrases.map((p: any, i: number) => (
                         <div key={i} className="flex items-start gap-3 py-2 border-b border-gray-100 last:border-b-0">
-                          <span className="text-xs font-bold text-gray-400 bg-gray-200 w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                            {i + 1}
-                          </span>
-
+                          <span className="text-xs font-bold text-gray-400 bg-gray-200 w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-1">{i + 1}</span>
+                          
                           {editingPhrase?.batchId === batch.id && editingPhrase?.idx === i ? (
-                            /* Edit mode */
+                            // Edit mode
                             <div className="flex-1 space-y-2">
-                              <div>
-                                <label className="text-xs font-bold text-gray-500">日本語</label>
-                                <input
-                                  type="text"
-                                  value={editJp}
-                                  onChange={e => setEditJp(e.target.value)}
-                                  className="w-full p-2 border border-blue-300 rounded text-sm"
-                                  style={{ fontSize: '16px' }}
-                                />
-                              </div>
-                              <div>
-                                <label className="text-xs font-bold text-gray-500">English</label>
-                                <input
-                                  type="text"
-                                  value={editEn}
-                                  onChange={e => setEditEn(e.target.value)}
-                                  className="w-full p-2 border border-blue-300 rounded text-sm"
-                                  style={{ fontSize: '16px' }}
-                                />
-                              </div>
+                              <input
+                                type="text"
+                                value={editJp}
+                                onChange={(e) => setEditJp(e.target.value)}
+                                className="w-full p-2 border border-blue-300 rounded text-sm"
+                                placeholder="日本語"
+                                style={{ fontSize: '16px' }}
+                              />
+                              <input
+                                type="text"
+                                value={editEn}
+                                onChange={(e) => setEditEn(e.target.value)}
+                                className="w-full p-2 border border-blue-300 rounded text-sm"
+                                placeholder="English"
+                                style={{ fontSize: '16px' }}
+                              />
                               <div className="flex gap-2">
                                 <button
                                   onClick={saveEdit}
                                   disabled={saving}
-                                  className="bg-green-600 text-white px-3 py-1 rounded text-xs font-bold"
+                                  className="bg-blue-600 text-white px-3 py-1 rounded text-xs font-bold disabled:opacity-50"
                                 >
                                   {saving ? '保存中...' : '💾 保存'}
                                 </button>
                                 <button
                                   onClick={cancelEdit}
-                                  className="bg-gray-300 text-gray-700 px-3 py-1 rounded text-xs font-bold"
+                                  className="bg-gray-200 text-gray-700 px-3 py-1 rounded text-xs font-bold"
                                 >
                                   キャンセル
                                 </button>
                               </div>
                             </div>
                           ) : (
-                            /* Display mode */
+                            // Display mode
                             <>
-                              <div className="flex-1 min-w-0">
-                                <p className="font-semibold text-sm">{p.japanese || '（日本語なし）'}</p>
-                                <p className="text-sm text-blue-700">{p.english || '（英語なし）'}</p>
+                              <div className="flex-1">
+                                <p className="font-semibold text-sm">{p.japanese}</p>
+                                <p className="text-sm text-blue-700">{p.english}</p>
                                 {p.situation && <p className="text-xs text-gray-400">📍 {p.situation}</p>}
                               </div>
                               <div className="flex items-center gap-1 flex-shrink-0">
@@ -256,14 +253,19 @@ export default function NotesPage() {
                                     e.stopPropagation();
                                     startEdit(batch.id, i, p.japanese || '', p.english || '');
                                   }}
-                                  className="text-gray-400 hover:text-blue-500 text-sm"
+                                  className="text-gray-400 hover:text-blue-600 text-sm p-1"
+                                  title="編集"
                                 >
                                   ✏️
                                 </button>
                                 {p.english && (
                                   <button
-                                    onClick={(e) => { e.stopPropagation(); speak(p.english); }}
-                                    className="text-lg"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      speak(p.english);
+                                    }}
+                                    className="text-gray-400 hover:text-blue-600 text-lg p-1"
+                                    title="発音"
                                   >
                                     🔊
                                   </button>
