@@ -147,6 +147,58 @@ export async function deleteBatch(batchId: string): Promise<void> {
   await deleteDoc(doc(db, 'batches', batchId));
 }
 
+// ============ Memorized (long-term memory check) ============
+
+export async function saveMemorized(
+  userId: string,
+  phrases: { japanese: string; english: string; situation?: string }[],
+  stage: string,
+  batchId: string
+): Promise<void> {
+  if (!phrases || phrases.length === 0) return;
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  await addDoc(collection(db, 'memorized'), {
+    userId,
+    phrases,
+    stage,
+    batchId,
+    completedDate: todayStr,
+    createdAt: Timestamp.now(),
+  });
+}
+
+export async function getMemorized(userId: string): Promise<any[]> {
+  const q = query(collection(db, 'memorized'), where('userId', '==', userId));
+  const snapshot = await getDocs(q);
+  const items = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+  items.sort((a: any, b: any) => {
+    const aTime = a.createdAt?.seconds || 0;
+    const bTime = b.createdAt?.seconds || 0;
+    return bTime - aTime;
+  });
+  return items;
+}
+
+export async function getMemorizedForLongTermCheck(userId: string, daysAgo: number = 90): Promise<any[]> {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - daysAgo);
+  const cutoffStr = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, '0')}-${String(cutoff.getDate()).padStart(2, '0')}`;
+
+  const q = query(collection(db, 'memorized'), where('userId', '==', userId));
+  const snapshot = await getDocs(q);
+  const eligible: any[] = [];
+  snapshot.docs.forEach((d) => {
+    const data = d.data();
+    if (data.completedDate && data.completedDate <= cutoffStr) {
+      (data.phrases || []).forEach((p: any) => {
+        eligible.push({ ...p, memorizedId: d.id, completedDate: data.completedDate, stage: data.stage });
+      });
+    }
+  });
+  return eligible;
+}
+
 // ============ Settings ============
 
 export async function getSettings(userId: string): Promise<UserSettings> {

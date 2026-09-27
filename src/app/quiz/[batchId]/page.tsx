@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { getBatch, updateBatch, getSettings } from '@/lib/db';
+import { getBatch, updateBatch, getSettings, saveMemorized, getCollecting, saveCollecting } from '@/lib/db';
 import { STAGE_CONFIG } from '@/lib/types';
 
 export default function QuizPage() {
@@ -55,12 +55,40 @@ export default function QuizPage() {
     const selectedPhrases = selectedArr.map(i => quizResults[i].phrase);
     const nextPhrases = selectedPhrases.slice(0, target);
 
+    // あふれフレーズ（目標を超えて選んだ分）→ collecting に保存
+    const overflowPhrases = selectedArr.length > target
+      ? selectedArr.slice(target).map(i => quizResults[i].phrase)
+      : [];
+
+    // 選ばれなかったフレーズ = 覚えたフレーズ → memorized に保存
+    const allIndices = new Set(quizResults.map((_, i) => i));
+    const selectedSet = new Set(selectedArr);
+    const memorizedPhrases = Array.from(allIndices)
+      .filter(i => !selectedSet.has(i))
+      .map(i => quizResults[i].phrase);
+
     const settings = await getSettings(batch.userId);
     const nextStage = config.next;
 
-    // 今日の日付（実際の復習日）
+    // 今日の日付（ローカル時間）
     const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+    // 覚えたフレーズを memorized コレクションに保存
+    if (memorizedPhrases.length > 0) {
+      await saveMemorized(batch.userId, memorizedPhrases, batch.stage, batchId as string);
+    }
+
+    // あふれフレーズを collecting に追加
+    if (overflowPhrases.length > 0) {
+      const existing = await getCollecting(batch.userId);
+      const merged = [...existing, ...overflowPhrases.map((p: any) => ({
+        japanese: p.japanese || '',
+        english: p.english || '',
+        situation: p.situation || '',
+      }))];
+      await saveCollecting(batch.userId, merged);
+    }
 
     if (nextStage) {
       const nextConfig = STAGE_CONFIG[nextStage];
@@ -83,10 +111,13 @@ export default function QuizPage() {
           date: today.toISOString(),
           stage: batch.stage,
           selected: selectedArr.length,
+          memorized: memorizedPhrases.length,
+          overflow: overflowPhrases.length,
           actualReviewDate: todayStr,
         }],
       });
     } else {
+      // 最終ステージ → 残りの6個はシルバーへ（今はcompleted）
       await updateBatch(batchId as string, {
         status: 'completed',
         lastReviewDate: todayStr,
@@ -94,6 +125,8 @@ export default function QuizPage() {
           date: today.toISOString(),
           stage: batch.stage,
           selected: selectedArr.length,
+          memorized: memorizedPhrases.length,
+          overflow: overflowPhrases.length,
           actualReviewDate: todayStr,
         }],
       });
@@ -210,10 +243,15 @@ export default function QuizPage() {
           );
         })}
       </div>
-      <button onClick={handleConfirmSelection} disabled={selCount < config.to}
-        className="w-full bg-blue-600 text-white p-4 rounded-xl font-bold text-lg disabled:opacity-50">
-        確定 ({selCount}個選択)
-      </button>
+      <div className="space-y-2">
+        <p className="text-xs text-gray-400 text-center">
+          選ばなかったフレーズ({quizResults.length - selCount}個) → 🔒 長期記憶チェックへ
+        </p>
+        <button onClick={handleConfirmSelection} disabled={selCount < config.to}
+          className="w-full bg-blue-600 text-white p-4 rounded-xl font-bold text-lg disabled:opacity-50">
+          確定 ({selCount}個選択)
+        </button>
+      </div>
     </div>
   );
 }
