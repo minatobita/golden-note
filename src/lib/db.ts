@@ -13,14 +13,18 @@ import {
   Timestamp,
 } from 'firebase/firestore';
 import { SEED_PHRASES } from './seed-data';
-import { Phrase, Batch, UserSettings, DEFAULT_SETTINGS } from './types';
+
+function localDateStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
 
 // ============ Seed ============
 
 export async function seedIfNeeded(userId: string): Promise<void> {
   const q = query(collection(db, 'phrases'), where('userId', '==', userId));
   const snapshot = await getDocs(q);
-  if (!snapshot.empty) return; // already seeded
+  if (!snapshot.empty) return;
 
   const batch_size = 50;
   for (let i = 0; i < SEED_PHRASES.length; i += batch_size) {
@@ -39,20 +43,19 @@ export async function seedIfNeeded(userId: string): Promise<void> {
 
 // ============ Phrases ============
 
-export async function getPhrases(userId: string): Promise<(Phrase & { id: string })[]> {
+export async function getPhrases(userId: string) {
   const q = query(collection(db, 'phrases'), where('userId', '==', userId));
   const snapshot = await getDocs(q);
-  const phrases = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Phrase & { id: string }));
-  // Sort client-side to avoid composite index requirement
-  phrases.sort((a, b) => {
+  const phrases = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+  phrases.sort((a: any, b: any) => {
     const aTime = a.createdAt?.seconds || 0;
     const bTime = b.createdAt?.seconds || 0;
-    return bTime - aTime; // descending
+    return bTime - aTime;
   });
   return phrases;
 }
 
-export async function addPhrase(userId: string, phrase: Partial<Phrase>): Promise<string> {
+export async function addPhrase(userId: string, phrase: any): Promise<string> {
   const docRef = await addDoc(collection(db, 'phrases'), {
     ...phrase,
     userId,
@@ -62,7 +65,7 @@ export async function addPhrase(userId: string, phrase: Partial<Phrase>): Promis
   return docRef.id;
 }
 
-export async function updatePhrase(phraseId: string, data: Partial<Phrase>): Promise<void> {
+export async function updatePhrase(phraseId: string, data: any): Promise<void> {
   await updateDoc(doc(db, 'phrases', phraseId), data);
 }
 
@@ -72,21 +75,13 @@ export async function deletePhrase(phraseId: string): Promise<void> {
 
 // ============ Collecting (cross-device sync) ============
 
-interface CollectPhrase {
-  japanese: string;
-  english: string;
-  situation: string;
-  isAI?: boolean;
-}
-
-export async function getCollecting(userId: string): Promise<CollectPhrase[]> {
+export async function getCollecting(userId: string): Promise<any[]> {
   const docSnap = await getDoc(doc(db, 'collecting', userId));
   if (!docSnap.exists()) return [];
-  const data = docSnap.data();
-  return data.phrases || [];
+  return docSnap.data().phrases || [];
 }
 
-export async function saveCollecting(userId: string, phrases: CollectPhrase[]): Promise<void> {
+export async function saveCollecting(userId: string, phrases: any[]): Promise<void> {
   await setDoc(doc(db, 'collecting', userId), {
     phrases,
     updatedAt: Timestamp.now(),
@@ -97,30 +92,50 @@ export async function clearCollecting(userId: string): Promise<void> {
   await deleteDoc(doc(db, 'collecting', userId));
 }
 
+// ============ Silver/Golden Pool ============
+
+export async function getSilverPool(userId: string): Promise<any[]> {
+  const snap = await getDoc(doc(db, 'silverPool', userId));
+  return snap.exists() ? (snap.data().phrases || []) : [];
+}
+
+export async function saveSilverPool(userId: string, phrases: any[]): Promise<void> {
+  await setDoc(doc(db, 'silverPool', userId), { phrases, updatedAt: Timestamp.now() });
+}
+
+export async function getGoldenPool(userId: string): Promise<any[]> {
+  const snap = await getDoc(doc(db, 'goldenPool', userId));
+  return snap.exists() ? (snap.data().phrases || []) : [];
+}
+
+export async function saveGoldenPool(userId: string, phrases: any[]): Promise<void> {
+  await setDoc(doc(db, 'goldenPool', userId), { phrases, updatedAt: Timestamp.now() });
+}
+
 // ============ Batches ============
 
-export async function getBatches(userId: string): Promise<(Batch & { id: string })[]> {
+export async function getBatches(userId: string) {
   const q = query(collection(db, 'batches'), where('userId', '==', userId));
   const snapshot = await getDocs(q);
-  const batches = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Batch & { id: string }));
-  // Sort client-side to avoid composite index requirement
-  batches.sort((a, b) => {
+  const batches = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+  batches.sort((a: any, b: any) => {
     const aTime = a.createdAt?.seconds || 0;
     const bTime = b.createdAt?.seconds || 0;
-    return bTime - aTime; // descending
+    return bTime - aTime;
   });
   return batches;
 }
 
-export async function createBatch(userId: string, phrases: { japanese: string; english: string; situation?: string }[]): Promise<string> {
+export async function createBatch(userId: string, phrases: any[], noteLevel: string = 'bronze'): Promise<string> {
   if (!phrases || phrases.length === 0) {
     throw new Error('No phrases provided');
   }
+  const stage = `${noteLevel}_25_18`;
   const docRef = await addDoc(collection(db, 'batches'), {
     userId,
     phrases,
-    stage: 'bronze_25_18',
-    noteLevel: 'bronze',
+    stage,
+    noteLevel,
     totalPhrases: phrases.length,
     targetCount: 18,
     status: 'translating',
@@ -133,14 +148,14 @@ export async function createBatch(userId: string, phrases: { japanese: string; e
   return docRef.id;
 }
 
-export async function updateBatch(batchId: string, data: Partial<Batch>): Promise<void> {
+export async function updateBatch(batchId: string, data: any): Promise<void> {
   await updateDoc(doc(db, 'batches', batchId), data);
 }
 
-export async function getBatch(batchId: string): Promise<(Batch & { id: string }) | null> {
+export async function getBatch(batchId: string) {
   const docSnap = await getDoc(doc(db, 'batches', batchId));
   if (!docSnap.exists()) return null;
-  return { id: docSnap.id, ...docSnap.data() } as Batch & { id: string };
+  return { id: docSnap.id, ...docSnap.data() };
 }
 
 export async function deleteBatch(batchId: string): Promise<void> {
@@ -151,19 +166,17 @@ export async function deleteBatch(batchId: string): Promise<void> {
 
 export async function saveMemorized(
   userId: string,
-  phrases: { japanese: string; english: string; situation?: string }[],
+  phrases: any[],
   stage: string,
-  batchId: string
+  noteLevel: string
 ): Promise<void> {
   if (!phrases || phrases.length === 0) return;
-  const today = new Date();
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   await addDoc(collection(db, 'memorized'), {
     userId,
     phrases,
     stage,
-    batchId,
-    completedDate: todayStr,
+    noteLevel,
+    memorizedAt: localDateStr(),
     createdAt: Timestamp.now(),
   });
 }
@@ -183,32 +196,48 @@ export async function getMemorized(userId: string): Promise<any[]> {
 export async function getMemorizedForLongTermCheck(userId: string, daysAgo: number = 90): Promise<any[]> {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - daysAgo);
-  const cutoffStr = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, '0')}-${String(cutoff.getDate()).padStart(2, '0')}`;
+  const cutoffStr = `${cutoff.getFullYear()}-${String(cutoff.getMonth()+1).padStart(2,'0')}-${String(cutoff.getDate()).padStart(2,'0')}`;
 
   const q = query(collection(db, 'memorized'), where('userId', '==', userId));
   const snapshot = await getDocs(q);
   const eligible: any[] = [];
   snapshot.docs.forEach((d) => {
     const data = d.data();
-    if (data.completedDate && data.completedDate <= cutoffStr) {
+    if (data.memorizedAt && data.memorizedAt <= cutoffStr) {
       (data.phrases || []).forEach((p: any) => {
-        eligible.push({ ...p, memorizedId: d.id, completedDate: data.completedDate, stage: data.stage });
+        eligible.push({ ...p, memorizedDocId: d.id, noteLevel: data.noteLevel });
       });
     }
   });
-  return eligible;
+  // Shuffle and pick 3
+  for (let i = eligible.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [eligible[i], eligible[j]] = [eligible[j], eligible[i]];
+  }
+  return eligible.slice(0, 3);
 }
 
 // ============ Settings ============
 
-export async function getSettings(userId: string): Promise<UserSettings> {
+export async function getSettings(userId: string) {
   const docSnap = await getDoc(doc(db, 'settings', userId));
-  if (!docSnap.exists()) return DEFAULT_SETTINGS;
-  return { ...DEFAULT_SETTINGS, ...docSnap.data() } as UserSettings;
+  if (!docSnap.exists()) return { intervals: {} };
+  return docSnap.data();
 }
 
-export async function saveSettings(userId: string, settings: Partial<UserSettings>): Promise<void> {
+export async function saveSettings(userId: string, settings: any): Promise<void> {
   await setDoc(doc(db, 'settings', userId), settings, { merge: true });
+}
+
+// ============ User Preferences (translation notes) ============
+
+export async function getUserPreferences(userId: string): Promise<string> {
+  const snap = await getDoc(doc(db, 'preferences', userId));
+  return snap.exists() ? (snap.data().notes || '') : '';
+}
+
+export async function saveUserPreferences(userId: string, notes: string): Promise<void> {
+  await setDoc(doc(db, 'preferences', userId), { notes, updatedAt: Timestamp.now() });
 }
 
 // ============ Analysis Cache ============

@@ -2,8 +2,8 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { onAuthChange, signOut } from '@/lib/auth';
-import { seedIfNeeded, getPhrases, addPhrase, deletePhrase, getBatches, createBatch, updateBatch, getCollecting, saveCollecting, clearCollecting } from '@/lib/db';
-import { STAGE_CONFIG } from '@/lib/types';
+import { seedIfNeeded, getPhrases, addPhrase, deletePhrase, getBatches, createBatch, updateBatch, getCollecting, saveCollecting, clearCollecting, getSilverPool, getGoldenPool } from '@/lib/db';
+import { STAGE_CONFIG, getNoteLevelEmoji } from '@/lib/types';
 import Navbar from '@/components/Navbar';
 
 interface CollectPhrase {
@@ -25,11 +25,11 @@ export default function HomePage() {
   const [sit, setSit] = useState('');
   const [toast, setToast] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
-  const [translateLoading, setTranslateLoading] = useState(false);
+  const [silverCount, setSilverCount] = useState(0);
+  const [goldenCount, setGoldenCount] = useState(0);
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
 
-  // Load from Firestore on auth
   useEffect(() => {
     const unsub = onAuthChange(async (u) => {
       if (!u) { router.push('/login'); return; }
@@ -38,23 +38,24 @@ export default function HomePage() {
         await seedIfNeeded(u.uid);
         const b = await getBatches(u.uid);
         setBatches(b);
-        // Load collecting phrases from Firestore ONLY
         const collecting = await getCollecting(u.uid);
         setCollectList(collecting);
-        // Clear any stale localStorage to prevent future issues
         localStorage.removeItem('golden-note-collect');
+        // Pool counts
+        const sp = await getSilverPool(u.uid);
+        setSilverCount(sp.length);
+        const gp = await getGoldenPool(u.uid);
+        setGoldenCount(gp.length);
       } catch (err) { console.error(err); }
       setLoading(false);
     });
     return () => unsub();
   }, []);
 
-  // Save to Firestore whenever collectList changes (after initial load)
   useEffect(() => {
     if (!user || loading) return;
     if (collectList.length > 0) {
       saveCollecting(user.uid, collectList).catch(console.error);
-      // Also keep localStorage as backup for workshop
       localStorage.setItem('golden-note-collect', JSON.stringify(collectList));
     } else {
       clearCollecting(user.uid).catch(console.error);
@@ -74,8 +75,9 @@ export default function HomePage() {
 
   const handleAIFill = async () => {
     if (!user) return;
-    const remaining = 25 - collectList.length;
-    if (remaining <= 0) { showToast('既に25個あります'); return; }
+    const pairCount = collectList.filter(p => p.japanese && p.english).length;
+    const remaining = 25 - pairCount;
+    if (remaining <= 0) { showToast('既にペアが25個以上あります'); return; }
     setAiLoading(true);
     try {
       const res = await fetch('/api/suggest', {
@@ -94,38 +96,44 @@ export default function HomePage() {
     setAiLoading(false);
   };
 
-  // Workshop: does NOT create a batch. Saves to localStorage and navigates.
   const handleGoToWorkshop = () => {
-    if (collectList.length === 0) { showToast('📝 リストにフレーズがありません。先にフレーズを追加してください。'); return; }
-    // Save current list to localStorage for workshop to read
+    if (collectList.length === 0) { showToast('📝 フレーズを追加してください。'); return; }
     localStorage.setItem('golden-note-collect', JSON.stringify(collectList));
     router.push('/workshop');
   };
 
-  // Create batch: only when 25 phrases, all translated
   const handleCreateBatch = async () => {
-    if (!user || collectList.length < 25) { showToast('25個のフレーズが必要です'); return; }
-    const allTranslated = collectList.every(p => p.japanese && p.english);
-    if (!allTranslated) { showToast('全てのフレーズに日英の翻訳が必要です'); return; }
-    const phrases = collectList.slice(0, 25).map(p => ({ japanese: p.japanese, english: p.english, situation: p.situation }));
-    const remaining = collectList.slice(25);
+    if (!user) return;
+    // Find first 25 phrases that have both japanese and english
+    const pairs: { idx: number; phrase: CollectPhrase }[] = [];
+    collectList.forEach((p, i) => {
+      if (p.japanese && p.english && pairs.length < 25) {
+        pairs.push({ idx: i, phrase: p });
+      }
+    });
+    if (pairs.length < 25) { showToast('日英ペアが25個必要です'); return; }
+
+    const batchPhrases = pairs.map(p => ({ japanese: p.phrase.japanese, english: p.phrase.english, situation: p.phrase.situation || '' }));
+    const usedIndices = new Set(pairs.map(p => p.idx));
+    const remaining = collectList.filter((_, i) => !usedIndices.has(i));
+
     try {
-      const batchId = await createBatch(user.uid, phrases);
-      for (const p of phrases) {
+      const batchId = await createBatch(user.uid, batchPhrases);
+      for (const p of batchPhrases) {
         await addPhrase(user.uid, { japanese: p.japanese, english: p.english, situation: p.situation });
       }
       setCollectList(remaining);
-      localStorage.removeItem('golden-note-collect');
       const b = await getBatches(user.uid);
       setBatches(b);
       router.push(`/study/${batchId}`);
     } catch (err: any) { showToast('バッチ作成エラー: ' + (err.message || '')); }
   };
 
-  // Review items
-  const today = new Date().toISOString().split('T')[0];
-  const reviewBatches = batches.filter(b => b.status === 'reviewing' && b.nextReviewDate && b.nextReviewDate <= today);
-  reviewBatches.sort((a, b) => {
+  // Review items - use local date
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  const reviewBatches = batches.filter((b: any) => b.status === 'reviewing' && b.nextReviewDate && b.nextReviewDate <= today);
+  reviewBatches.sort((a: any, b: any) => {
     if (a.nextReviewDate !== b.nextReviewDate) return a.nextReviewDate < b.nextReviewDate ? -1 : 1;
     return (a.intervalDays || 0) - (b.intervalDays || 0);
   });
@@ -133,15 +141,13 @@ export default function HomePage() {
   if (loading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
 
   const count = collectList.length;
-  const translatedCount = collectList.filter(p => p.japanese && p.english).length;
-  const canStartLearning = translatedCount >= 25;
+  const pairCount = collectList.filter(p => p.japanese && p.english).length;
+  const canStartLearning = pairCount >= 25;
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-4 pb-24">
-      {/* Toast */}
       {toast && <div className="fixed top-4 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-5 py-3 rounded-xl text-sm font-semibold z-50 max-w-xs text-center">{toast}</div>}
 
-      {/* Header */}
       <div className="flex justify-between items-center mb-4">
         <div>
           <h1 className="text-2xl font-bold">🏠 Golden Note</h1>
@@ -155,15 +161,16 @@ export default function HomePage() {
         <h2 className="text-lg font-bold mb-3">📌 今日の復習</h2>
         {reviewBatches.length === 0 ? (
           <div className="bg-white rounded-xl border border-gray-200 p-6 text-center text-gray-400">今日の復習はありません ✨</div>
-        ) : reviewBatches.map(b => {
-          const config = STAGE_CONFIG[b.stage] || { from: 25, to: 18 };
+        ) : reviewBatches.map((b: any) => {
+          const cfg = STAGE_CONFIG[b.stage] || { from: 25, to: 18 };
+          const emoji = getNoteLevelEmoji(b.noteLevel || 'bronze');
           const isOverdue = b.nextReviewDate < today;
           const daysOverdue = Math.floor((new Date(today).getTime() - new Date(b.nextReviewDate).getTime()) / 86400000);
           return (
             <div key={b.id} onClick={() => router.push(`/quiz/${b.id}`)}
               className={`p-4 rounded-xl border-2 mb-2 cursor-pointer transition-transform active:scale-98 ${isOverdue ? 'border-red-400 bg-gradient-to-r from-red-50 to-red-100' : 'border-blue-400 bg-gradient-to-r from-blue-50 to-blue-100'}`}>
               <div className="flex justify-between items-center mb-1">
-                <span className="font-bold">🥉 {config.from}→{config.to}</span>
+                <span className="font-bold">{emoji} {cfg.from}→{cfg.to}</span>
                 <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${isOverdue ? 'bg-red-500 text-white' : 'bg-blue-500 text-white'}`}>
                   {isOverdue ? `${daysOverdue}日超過` : '今日'}
                 </span>
@@ -175,25 +182,40 @@ export default function HomePage() {
         })}
       </div>
 
+      {/* Pool Status */}
+      {(silverCount > 0 || goldenCount > 0) && (
+        <div className="flex gap-2 mb-4">
+          {silverCount > 0 && (
+            <div className="flex-1 bg-gray-100 rounded-lg p-3 text-center">
+              <span className="text-sm">🥈 シルバープール: {silverCount}/25</span>
+            </div>
+          )}
+          {goldenCount > 0 && (
+            <div className="flex-1 bg-yellow-50 rounded-lg p-3 text-center">
+              <span className="text-sm">🥇 ゴールデンプール: {goldenCount}/25</span>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Phrase Collection */}
       <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
         <div className="flex justify-between items-center mb-2">
           <h2 className="text-lg font-bold">✏️ フレーズ収集</h2>
-          <span className={`text-lg font-bold ${count >= 25 ? 'text-green-600' : 'text-blue-600'}`}>{count}個</span>
+          <span className={`text-lg font-bold ${pairCount >= 25 ? 'text-green-600' : 'text-blue-600'}`}>{count}個 ({pairCount}ペア)</span>
         </div>
-        {count < 25 && (
+        {pairCount < 25 && (
           <>
             <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
-              <div className="bg-blue-600 h-2 rounded-full transition-all" style={{ width: `${Math.min(100, (count / 25) * 100)}%` }} />
+              <div className="bg-blue-600 h-2 rounded-full transition-all" style={{ width: `${Math.min(100, (pairCount / 25) * 100)}%` }} />
             </div>
-            <p className="text-sm text-gray-500 mb-4">あと {25 - count} フレーズ必要</p>
+            <p className="text-sm text-gray-500 mb-4">あと {25 - pairCount} ペア必要</p>
           </>
         )}
-        {count >= 25 && (
-          <p className="text-sm text-green-600 font-semibold mb-4">✅ 25個以上あります！{canStartLearning ? '学習開始できます' : '未翻訳のフレーズがあります'}</p>
+        {pairCount >= 25 && (
+          <p className="text-sm text-green-600 font-semibold mb-4">✅ 25ペア以上あります！学習開始できます</p>
         )}
 
-        {/* Input */}
         <div className="bg-gray-50 rounded-xl p-4 mb-4 space-y-3">
           <div>
             <label className="text-sm font-bold text-gray-700">日本語</label>
@@ -213,9 +235,8 @@ export default function HomePage() {
           <button onClick={handleAdd} className="w-full bg-blue-600 text-white p-3 rounded-lg font-bold text-base">＋ 追加</button>
         </div>
 
-        {/* Action buttons */}
         <div className="flex gap-2 flex-wrap mb-4">
-          {count < 25 && (
+          {pairCount < 25 && (
             <button onClick={handleAIFill} disabled={aiLoading}
               className="flex-1 bg-gradient-to-r from-yellow-400 to-orange-400 text-white px-4 py-3 rounded-lg font-bold text-sm disabled:opacity-50">
               {aiLoading ? '生成中...' : '✨ AIで25個にする'}
@@ -229,15 +250,13 @@ export default function HomePage() {
           )}
         </div>
 
-        {/* Create batch button */}
         {canStartLearning && (
           <button onClick={handleCreateBatch}
             className="w-full bg-gradient-to-r from-amber-500 to-orange-500 text-white px-4 py-3 rounded-lg font-bold text-sm mb-4">
-            📖 25個で学習開始（残りはここに残ります）
+            📖 25ペアで学習開始（残りはここに残ります）
           </button>
         )}
 
-        {/* Collected phrases list */}
         {collectList.length > 0 && (
           <div>
             <h3 className="text-sm font-bold text-gray-500 mb-2">収集済みフレーズ</h3>
