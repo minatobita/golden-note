@@ -165,7 +165,11 @@ export default function HomePage() {
           const cfg = STAGE_CONFIG[b.stage] || { from: 25, to: 18 };
           const emoji = getNoteLevelEmoji(b.noteLevel || 'bronze');
           const isOverdue = b.nextReviewDate < today;
-          const daysOverdue = Math.floor((new Date(today).getTime() - new Date(b.nextReviewDate).getTime()) / 86400000);
+          const todayParts = today.split('-').map(Number);
+          const reviewParts = (b.nextReviewDate || today).split('-').map(Number);
+          const todayMs = Date.UTC(todayParts[0], todayParts[1]-1, todayParts[2]);
+          const reviewMs = Date.UTC(reviewParts[0], reviewParts[1]-1, reviewParts[2]);
+          const daysOverdue = Math.floor((todayMs - reviewMs) / 86400000);
           return (
             <div key={b.id} onClick={() => router.push(`/quiz/${b.id}`)}
               className={`p-4 rounded-xl border-2 mb-2 cursor-pointer transition-transform active:scale-98 ${isOverdue ? 'border-red-400 bg-gradient-to-r from-red-50 to-red-100' : 'border-blue-400 bg-gradient-to-r from-blue-50 to-blue-100'}`}>
