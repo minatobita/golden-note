@@ -219,10 +219,10 @@ export async function getMemorizedForLongTermCheck(userId: string, daysAgo: numb
 
 // ============ Settings ============
 
-export async function getSettings(userId: string) {
+export async function getSettings(userId: string): Promise<any> {
   const docSnap = await getDoc(doc(db, 'settings', userId));
   if (!docSnap.exists()) return { intervals: {} };
-  return docSnap.data();
+  return { ...docSnap.data() };
 }
 
 export async function saveSettings(userId: string, settings: any): Promise<void> {
