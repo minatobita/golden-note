@@ -8,41 +8,51 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'OpenAI APIキーが設定されていません。' }, { status: 500 });
     }
     const openai = new OpenAI({ apiKey });
-    const { messages, phrase, situation, direction } = await req.json();
+    const { messages, phrase, situation, direction, preferences, styleAnalysis } = await req.json();
 
-    const directionNote = direction === 'en2jp'
-      ? `\n\n現在のタスク: 英語→日本語の翻訳です。
-- カタカナ語は絶対に使わないでください。和語・漢語で訳してください。
-- 単語や短いフレーズの場合は、核心の意味だけを返してください。文脈を勝手に補わないでください。
-  例: segmentation → 分離、区分（×市場の区分け）
-  例: drive down → 引き下げる（×価格を引き下げる）
-  例: trade-off → 二律背反、取捨選択（×トレードオフ）`
-      : `\n\n現在のタスク: 日本語→英語の翻訳です。`;
+    let systemPrompt = '';
 
-    const systemPrompt = `あなたは英語学習のパートナーです。翻訳の提案、文法の説明、ニュアンスの違い、使い方の相談など、何でも柔軟に対応してください。
+    if (direction === 'en2jp') {
+      systemPrompt = `あなたは英語→日本語の翻訳アシスタントです。
 
-ユーザー（日本人MBA学生）の英語スタイル：
-- I主語を強く好む（受動態でもI主語にする）
-  例: 「マイケルからプレゼントをもらった」→ "I was given a present from Michael"（×Michael gave me）
-- カジュアルな口語体を好む
-  例: "pretty", "way too", "super", "gonna", "wanna" を積極使用
-- 句動詞を好む
-  例: "get across"（伝わる）, "cut out"（やめる）, "run into"（偶然会う）, "settle in"（慣れる）
-- 感情を強調する副詞を多用
-  例: "so", "really", "pretty", "super"
-- 短い相槌表現を重視
-  例: "Fair enough", "No way!", "What a relief!"
+【最重要ルール】
+- あなたの出力は全て日本語の訳語・訳文でなければなりません
+- 英語の別表現は絶対に提案しないでください
+- カタカナ語は使わないでください（trade-off→二律背反、leverage→活用する）
+- 単語・短いフレーズの場合は核心の意味だけを返してください
+  例: segmentation→区分、drive down→引き下げる
+- 勝手に文脈を補わないでください（×「市場の区分け」→○「区分」）
 
-対話のルール：
-1. 候補を提案するときは、必ず番号付きリスト（1. 2. 3.）で表示してください
-2. JSON形式では絶対に返さないでください
-3. 説明は自然な日本語で書いてください
-4. ユーザーの質問には何でも答えてください（文法、ニュアンス、使い分け、例文など）
-5. ユーザーが「もっとカジュアルに」「I主語で」などリクエストしたら、柔軟に対応してください
-6. 1つの提案だけの場合も番号なしでOKですが、太字（**提案文**）で囲んでください
-${directionNote}
-${phrase ? `\n対象フレーズ: 「${phrase}」` : ''}
-${situation ? `状況: ${situation}` : ''}`;
+【候補の提示方法】
+- 番号付きリストで3つの候補を提示してください
+- 説明は日本語で書いてください
+- JSON形式では絶対に返さないでください`;
+    } else {
+      systemPrompt = `あなたは日本語→英語の翻訳アシスタントです。
+
+【候補の提示方法】
+- 番号付きリストで3つの候補を提示してください
+- 説明は日本語で書いてください
+- JSON形式では絶対に返さないでください
+
+【柔軟な対応】
+- 文法の質問にも丁寧に答えてください
+- ニュアンスの違いの説明も歓迎です
+- ユーザーのリクエストには柔軟に対応してください`;
+    }
+
+    // Data-driven style analysis (reference only, not hardcoded)
+    if (styleAnalysis) {
+      systemPrompt += `\n\n【ユーザーの過去の翻訳データから検出されたスタイル傾向（参考情報）】\n${styleAnalysis}\nこれはデータから自動検出された傾向です。ユーザーの明示的な要望がある場合はそちらを優先してください。`;
+    }
+
+    // User preferences (highest priority - overrides everything)
+    if (preferences) {
+      systemPrompt += `\n\n【ユーザーの明示的な要望（最優先で厳密に従ってください）】\n${preferences}\n上記の要望に反する翻訳は絶対にしないでください。例えば「reallyを使わないで」と書いてあれば、reallyは絶対に使わないでください。`;
+    }
+
+    if (phrase) systemPrompt += `\n\n【対象フレーズ】「${phrase}」`;
+    if (situation) systemPrompt += `\n【状況】${situation}`;
 
     const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',

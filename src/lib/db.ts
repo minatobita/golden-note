@@ -209,7 +209,6 @@ export async function getMemorizedForLongTermCheck(userId: string, daysAgo: numb
       });
     }
   });
-  // Shuffle and pick 3
   for (let i = eligible.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [eligible[i], eligible[j]] = [eligible[j], eligible[i]];
@@ -238,6 +237,12 @@ export async function getUserPreferences(userId: string): Promise<string> {
 
 export async function saveUserPreferences(userId: string, notes: string): Promise<void> {
   await setDoc(doc(db, 'preferences', userId), { notes, updatedAt: Timestamp.now() });
+}
+
+export async function getPreferences(userId: string): Promise<any> {
+  const snap = await getDoc(doc(db, 'preferences', userId));
+  if (!snap.exists()) return null;
+  return snap.data();
 }
 
 // ============ Analysis Cache ============
