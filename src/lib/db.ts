@@ -152,7 +152,7 @@ export async function updateBatch(batchId: string, data: any): Promise<void> {
   await updateDoc(doc(db, 'batches', batchId), data);
 }
 
-export async function getBatch(batchId: string) {
+export async function getBatch(batchId: string): Promise<any> {
   const docSnap = await getDoc(doc(db, 'batches', batchId));
   if (!docSnap.exists()) return null;
   return { id: docSnap.id, ...docSnap.data() };
