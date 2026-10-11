@@ -33,14 +33,14 @@ export default function QuizPage() {
 
   useEffect(() => {
     (async () => {
-      const b = await getBatch(batchId as string);
+      const b: any = await getBatch(batchId as string);
       if (!b) return;
       setBatch(b);
 
       // Load long-term memory phrases (90 days+, max 3)
       let ltPhrases: any[] = [];
       try {
-        ltPhrases = await getMemorizedForLongTermCheck((b as any).userId);
+        ltPhrases = await getMemorizedForLongTermCheck(b.userId);
       } catch (e) { console.error(e); }
 
       // Mix batch phrases + long-term phrases, then shuffle

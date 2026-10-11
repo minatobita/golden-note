@@ -39,3 +39,21 @@ export function getNextPool(noteLevel: string): 'silver' | 'golden' | 'collectin
   if (noteLevel === 'silver') return 'golden';
   return 'collecting';
 }
+
+export const DEFAULT_SETTINGS = {
+  intervals: {
+    bronze_25_18: 1,
+    bronze_18_13: 4,
+    bronze_13_9: 14,
+    bronze_9_6: 28,
+    silver_25_18: 1,
+    silver_18_13: 4,
+    silver_13_9: 14,
+    silver_9_6: 28,
+    golden_25_18: 1,
+    golden_18_13: 4,
+    golden_13_9: 14,
+    golden_9_6: 28,
+  },
+  longTermCheckDays: 90,
+};
