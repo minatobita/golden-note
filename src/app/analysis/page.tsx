@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { onAuthChange } from '@/lib/auth';
-import { getUserPreferences, saveUserPreferences, getMemorized, getSilverPool, getGoldenPool } from '@/lib/db';
+import { getUserPreferences, saveUserPreferences, getLongTermPool, getSilverPool, getGoldenPool } from '@/lib/db';
 import Navbar from '@/components/Navbar';
 
 export default function AnalysisPage() {
@@ -23,8 +23,8 @@ export default function AnalysisPage() {
       try {
         const prefs = await getUserPreferences(u.uid);
         setNotes(prefs);
-        const mem = await getMemorized(u.uid);
-        setMemorizedList(mem);
+        const pool = await getLongTermPool(u.uid);
+        setMemorizedList(pool);
         const sp = await getSilverPool(u.uid);
         setSilverPool(sp);
         const gp = await getGoldenPool(u.uid);
@@ -42,7 +42,14 @@ export default function AnalysisPage() {
     setTimeout(() => setSaved(false), 2000);
   };
 
-  const totalMemorized = memorizedList.reduce((sum, m) => sum + (m.phrases?.length || 0), 0);
+  // 長期記憶プールは既に「覚えた日が古い順」に並んでいる（＝出題順）
+  const flatMemorized = memorizedList;
+  // 次の復習クイズで出題される3問＝先頭の3つ
+  const usableIdx = flatMemorized.map((p: any, i: number) => (p.japanese && p.english ? i : -1)).filter((i: number) => i >= 0).slice(0, 3);
+  const isNext = (i: number) => usableIdx.includes(i);
+
+  const totalMemorized = flatMemorized.length;
+  const fmt = (s: string) => (s ? s.replace(/-/g, '/') : '-');
 
   if (loading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
 
@@ -98,18 +105,23 @@ export default function AnalysisPage() {
           <span className="text-gray-400">{showMemorized ? '▲ 閉じる' : '▼ 表示'}</span>
         </button>
         {showMemorized && (
-          <div className="mt-3 space-y-3">
-            {memorizedList.length === 0 ? (
+          <div className="mt-3">
+            <p className="text-xs text-gray-400 mb-2">
+              覚えた日が古い順（上から3問ずつ、毎回の復習クイズに出題されます）
+            </p>
+            {flatMemorized.length === 0 ? (
               <p className="text-sm text-gray-400 text-center py-4">まだありません</p>
-            ) : memorizedList.map((m, mi) => (
-              <div key={mi} className="border border-gray-100 rounded-lg p-3">
-                <p className="text-xs text-gray-400 mb-2">📅 {m.memorizedAt} • {m.noteLevel} • {m.stage}</p>
-                {(m.phrases || []).map((p: any, pi: number) => (
-                  <div key={pi} className="flex gap-2 py-1 border-b border-gray-50 last:border-0">
-                    <span className="text-sm font-semibold flex-1">{p.japanese}</span>
-                    <span className="text-sm text-blue-700 flex-1">{p.english}</span>
-                  </div>
-                ))}
+            ) : flatMemorized.map((p: any, i: number) => (
+              <div key={p.id || i} className={`py-2 border-b border-gray-50 last:border-0 ${isNext(i) ? 'bg-amber-50 -mx-2 px-2 rounded' : ''}`}>
+                <div className="flex gap-2">
+                  <span className="text-sm font-semibold flex-1">{p.japanese}</span>
+                  <span className="text-sm text-blue-700 flex-1">{p.english}</span>
+                </div>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {i + 1}. 📅 覚えた日: {fmt(p.memorizedAt)} • {p.noteLevel}
+                  {isNext(i) ? ' • 🔒 次回出題' : ''}
+                  {p.checkCount ? ` • チェック正解 ${p.checkCount}回` : ''}
+                </p>
               </div>
             ))}
           </div>
@@ -129,9 +141,6 @@ export default function AnalysisPage() {
               </div>
             ))}
           </div>
-          {silverPool.length >= 25 && (
-            <p className="text-sm text-green-600 font-bold mt-2">✅ 25個到達！次の復習完了時にシルバーバッチが自動作成されます</p>
-          )}
         </div>
       )}
 

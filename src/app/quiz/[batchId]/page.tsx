@@ -1,8 +1,10 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { getBatch, updateBatch, getSettings, saveMemorized, getCollecting, saveCollecting, getSilverPool, saveSilverPool, getGoldenPool, saveGoldenPool, getMemorizedForLongTermCheck } from '@/lib/db';
+import { getBatch, updateBatch, getSettings, addToLongTermPool, getCollecting, saveCollecting, getSilverPool, saveSilverPool, getGoldenPool, saveGoldenPool, getLongTermQuestions, applyLongTermResults } from '@/lib/db';
 import { STAGE_CONFIG, getNextPool, getNoteLevelEmoji } from '@/lib/types';
+
+const LONG_TERM_COUNT = 3;
 
 function getLocalDateStr(): string {
   const d = new Date();
@@ -12,7 +14,22 @@ function getLocalDateStr(): string {
 interface QuizItem {
   phrase: any;
   isLongTerm: boolean;
-  memorizedId?: string;
+  ltId?: string;
+  memorizedAt?: string;
+}
+
+interface QuizResult {
+  phrase: any;
+  correct: boolean;
+  isLongTerm: boolean;
+  ltId?: string;
+  memorizedAt?: string;
+}
+
+interface LtInfo {
+  poolSize: number;
+  asked: number;
+  error?: boolean;
 }
 
 export default function QuizPage() {
@@ -23,13 +40,16 @@ export default function QuizPage() {
   const [currentIdx, setCurrentIdx] = useState(0);
   const [showAnswer, setShowAnswer] = useState(false);
   const [allQuizItems, setAllQuizItems] = useState<QuizItem[]>([]);
-  const [quizResults, setQuizResults] = useState<{ phrase: any; correct: boolean; isLongTerm: boolean }[]>([]);
+  const [quizResults, setQuizResults] = useState<QuizResult[]>([]);
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
   const [drillPhrases, setDrillPhrases] = useState<any[]>([]);
   const [drillIdx, setDrillIdx] = useState(0);
   const [drillShowAnswer, setDrillShowAnswer] = useState(false);
   const [drillWrong, setDrillWrong] = useState<any[]>([]);
   const [drillRound, setDrillRound] = useState(1);
+  const [savingLongTerm, setSavingLongTerm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [ltInfo, setLtInfo] = useState<LtInfo | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -37,21 +57,26 @@ export default function QuizPage() {
       if (!b) return;
       setBatch(b);
 
-      // Load long-term memory phrases (90 days+, max 3)
+      // 長期記憶フォルダーの先頭（覚えた日が古い順）から3問。日数の条件はなし
       let ltPhrases: any[] = [];
       try {
-        ltPhrases = await getMemorizedForLongTermCheck(b.userId);
-      } catch (e) { console.error(e); }
+        const res = await getLongTermQuestions(b.userId, LONG_TERM_COUNT);
+        ltPhrases = res.questions;
+        setLtInfo({ poolSize: res.poolSize, asked: res.questions.length });
+      } catch (e) {
+        console.error(e);
+        setLtInfo({ poolSize: 0, asked: 0, error: true });
+      }
 
-      // Mix batch phrases + long-term phrases, then shuffle
       const batchItems: QuizItem[] = (b.phrases || []).map((p: any) => ({ phrase: p, isLongTerm: false }));
       const ltItems: QuizItem[] = ltPhrases.map((p: any) => ({
         phrase: { japanese: p.japanese, english: p.english, situation: p.situation || '' },
         isLongTerm: true,
-        memorizedId: p.id,
+        ltId: p.id,
+        memorizedAt: p.memorizedAt,
       }));
+      // 出題順はシャッフルして混在させる（どれを出すかは古い順で決定済み）
       const combined = [...batchItems, ...ltItems];
-      // Shuffle
       for (let i = combined.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [combined[i], combined[j]] = [combined[j], combined[i]];
@@ -81,41 +106,43 @@ export default function QuizPage() {
   };
 
   // --- Quiz Phase ---
-  const handleAnswer = (correct: boolean) => {
+  const handleAnswer = async (correct: boolean) => {
+    if (savingLongTerm) return;
     const item = allQuizItems[currentIdx];
-    const newResults = [...quizResults, { phrase: item.phrase, correct, isLongTerm: item.isLongTerm }];
+    const newResults: QuizResult[] = [...quizResults, {
+      phrase: item.phrase, correct, isLongTerm: item.isLongTerm,
+      ltId: item.ltId, memorizedAt: item.memorizedAt,
+    }];
     setQuizResults(newResults);
+
     if (currentIdx < allQuizItems.length - 1) {
       setCurrentIdx(currentIdx + 1);
       setShowAnswer(false);
-    } else {
-      // Quiz finished - go directly to select (skip results)
-      // Pre-select incorrect batch items
-      const batchResults = newResults.filter(r => !r.isLongTerm);
-      const preSelected = new Set<number>();
-      batchResults.forEach((r, i) => { if (!r.correct) preSelected.add(i); });
-      setSelectedIndices(preSelected);
-      setPhase('select');
-
-      // Handle long-term failures - add to collecting
-      handleLongTermFailures(newResults);
+      return;
     }
-  };
 
-  const handleLongTermFailures = async (results: { phrase: any; correct: boolean; isLongTerm: boolean }[]) => {
-    if (!batch) return;
-    const ltFailed = results.filter(r => r.isLongTerm && !r.correct);
-    if (ltFailed.length === 0) return;
+    // クイズ終了: 長期記憶の結果を先に保存（途中で中断しても反映される）
+    setSavingLongTerm(true);
     try {
-      const existing = await getCollecting(batch.userId);
-      const newPhrases = ltFailed.map(r => ({
-        japanese: r.phrase.japanese,
-        english: r.phrase.english,
-        situation: r.phrase.situation || '',
-        source: 'long-term-failed',
-      }));
-      await saveCollecting(batch.userId, [...(existing || []), ...newPhrases]);
-    } catch (e) { console.error(e); }
+      const ltResults = newResults.filter(r => r.isLongTerm && r.ltId);
+      if (ltResults.length > 0 && batch) {
+        await applyLongTermResults(batch.userId, ltResults.map(r => ({
+          id: r.ltId as string,
+          correct: r.correct,
+        })));
+      }
+    } catch (e) {
+      console.error(e);
+      alert('長期記憶チェックの保存に失敗しました。通信状況を確認してください。');
+    }
+    setSavingLongTerm(false);
+
+    // 結果画面は出さず、直接選択画面へ（不正解は自動選択）
+    const batchResults = newResults.filter(r => !r.isLongTerm);
+    const preSelected = new Set<number>();
+    batchResults.forEach((r, i) => { if (!r.correct) preSelected.add(i); });
+    setSelectedIndices(preSelected);
+    setPhase('select');
   };
 
   const toggleSelect = (idx: number) => {
@@ -147,12 +174,9 @@ export default function QuizPage() {
       setDrillIdx(drillIdx + 1);
       setDrillShowAnswer(false);
     } else {
-      // Round finished
       if (newWrong.length === 0) {
-        // All correct! Save and finish
         doSave();
       } else {
-        // Retry wrong ones
         setDrillPhrases(shuffleArray(newWrong));
         setDrillIdx(0);
         setDrillShowAnswer(false);
@@ -164,7 +188,8 @@ export default function QuizPage() {
 
   // --- Save results ---
   const doSave = async () => {
-    if (!batch) return;
+    if (!batch || saving) return;
+    setSaving(true);
     const batchResults = quizResults.filter(r => !r.isLongTerm);
     const target = config.to;
     const selectedArr = Array.from(selectedIndices);
@@ -174,23 +199,21 @@ export default function QuizPage() {
       ? selectedArr.slice(target).map(i => batchResults[i].phrase)
       : [];
 
-    // Memorized = batch items NOT selected (remembered!)
-    const allBatchIndices = new Set(batchResults.map((_, i) => i));
+    // 選ばなかった = 覚えた → 長期記憶へ
     const selectedSet = new Set(selectedArr);
-    const memorizedPhrases = Array.from(allBatchIndices)
-      .filter(i => !selectedSet.has(i))
-      .map(i => batchResults[i].phrase);
+    const memorizedPhrases = batchResults
+      .map((r, i) => ({ r, i }))
+      .filter(({ i }) => !selectedSet.has(i))
+      .map(({ r }) => r.phrase);
 
     const settings = await getSettings(batch.userId);
     const nextStage = config.next;
     const today = getLocalDateStr();
 
-    // Save memorized phrases
     if (memorizedPhrases.length > 0) {
-      await saveMemorized(batch.userId, memorizedPhrases, batch.stage, noteLevel);
+      await addToLongTermPool(batch.userId, memorizedPhrases, batch.stage, noteLevel);
     }
 
-    // Save overflow to collecting
     if (overflowPhrases.length > 0) {
       const existing = await getCollecting(batch.userId);
       const merged = [...existing, ...overflowPhrases.map((p: any) => ({
@@ -198,6 +221,12 @@ export default function QuizPage() {
       }))];
       await saveCollecting(batch.userId, merged);
     }
+
+    const ltResults = quizResults.filter(r => r.isLongTerm);
+    const ltSummary = {
+      longTermChecked: ltResults.length,
+      longTermCorrect: ltResults.filter(r => r.correct).length,
+    };
 
     if (nextStage) {
       const intervalDays = settings.intervals?.[nextStage] || 7;
@@ -217,36 +246,30 @@ export default function QuizPage() {
         reviewHistory: [...(batch.reviewHistory || []), {
           date: new Date().toISOString(), stage: batch.stage,
           selected: selectedArr.length, memorized: memorizedPhrases.length,
-          overflow: overflowPhrases.length, actualReviewDate: today,
+          overflow: overflowPhrases.length, actualReviewDate: today, ...ltSummary,
         }],
       });
     } else {
-      // Final stage (9→6): remaining go to next pool
       const pool = getNextPool(noteLevel);
       if (pool === 'silver') {
         const existing = await getSilverPool(batch.userId);
         const updated = [...existing, ...nextPhrases];
         await saveSilverPool(batch.userId, updated);
         if (updated.length >= 25) {
-          const silverBatch = updated.slice(0, 25);
-          const remainder = updated.slice(25);
           const { createBatch } = await import('@/lib/db');
-          await createBatch(batch.userId, silverBatch, 'silver');
-          await saveSilverPool(batch.userId, remainder);
+          await createBatch(batch.userId, updated.slice(0, 25), 'silver');
+          await saveSilverPool(batch.userId, updated.slice(25));
         }
       } else if (pool === 'golden') {
         const existing = await getGoldenPool(batch.userId);
         const updated = [...existing, ...nextPhrases];
         await saveGoldenPool(batch.userId, updated);
         if (updated.length >= 25) {
-          const goldenBatch = updated.slice(0, 25);
-          const remainder = updated.slice(25);
           const { createBatch } = await import('@/lib/db');
-          await createBatch(batch.userId, goldenBatch, 'golden');
-          await saveGoldenPool(batch.userId, remainder);
+          await createBatch(batch.userId, updated.slice(0, 25), 'golden');
+          await saveGoldenPool(batch.userId, updated.slice(25));
         }
       } else {
-        // Golden final → back to collecting
         const existing = await getCollecting(batch.userId);
         const merged = [...existing, ...nextPhrases.map((p: any) => ({
           japanese: p.japanese || '', english: p.english || '', situation: p.situation || '',
@@ -260,11 +283,12 @@ export default function QuizPage() {
         reviewHistory: [...(batch.reviewHistory || []), {
           date: new Date().toISOString(), stage: batch.stage,
           selected: selectedArr.length, memorized: memorizedPhrases.length,
-          actualReviewDate: today,
+          actualReviewDate: today, ...ltSummary,
         }],
       });
     }
 
+    setSaving(false);
     setPhase('done');
   };
 
@@ -272,6 +296,7 @@ export default function QuizPage() {
 
   // === QUIZ PHASE (batch + long-term mixed) ===
   if (phase === 'quiz') {
+    if (savingLongTerm) return <div className="min-h-screen flex items-center justify-center">長期記憶の結果を保存中...</div>;
     const item = allQuizItems[currentIdx];
     if (!item) return <div>Error: No phrase</div>;
     return (
@@ -280,11 +305,23 @@ export default function QuizPage() {
           <button onClick={() => router.push('/')} className="text-blue-600 font-semibold text-sm">← 中断して戻る</button>
           <span className="text-sm font-bold text-gray-500">問題 {currentIdx + 1}/{allQuizItems.length}</span>
         </div>
+        {currentIdx === 0 && ltInfo && (
+          <div className="mb-4 p-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800 text-center">
+            {ltInfo.error
+              ? '🔒 長期記憶フォルダーの読み込みに失敗しました（今回は長期記憶チェックなし）'
+              : ltInfo.asked > 0
+                ? `🔒 長期記憶チェック ${ltInfo.asked}問を含みます（フォルダー ${ltInfo.poolSize}個の古い順）`
+                : '🔒 長期記憶フォルダーはまだ空です'}
+          </div>
+        )}
         <div className={`bg-white rounded-2xl shadow-lg p-6 text-center ${item.isLongTerm ? 'border-2 border-amber-300' : ''}`}>
           <div className="flex items-center justify-center gap-2 mb-2">
             <p className="text-xs text-gray-400">{getNoteLevelEmoji(noteLevel)} {config.from}→{config.to}</p>
             {item.isLongTerm && <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">🔒 長期記憶チェック</span>}
           </div>
+          {item.isLongTerm && item.memorizedAt && (
+            <p className="text-xs text-amber-600 mb-2">覚えた日: {item.memorizedAt.replace(/-/g, '/')}</p>
+          )}
           <p className="text-2xl font-bold mb-6">{item.phrase.japanese}</p>
           {showAnswer ? (
             <>
@@ -294,7 +331,9 @@ export default function QuizPage() {
                 <button onClick={() => handleAnswer(true)} className="flex-1 bg-green-500 text-white p-4 rounded-xl font-bold text-lg">✅ 正解</button>
                 <button onClick={() => handleAnswer(false)} className="flex-1 bg-red-500 text-white p-4 rounded-xl font-bold text-lg">❌ 不正解</button>
               </div>
-              {item.isLongTerm && <p className="text-xs text-red-400 mt-2">不正解 → 収集リストに戻ります</p>}
+              {item.isLongTerm && (
+                <p className="text-xs text-gray-400 mt-2">正解 → 覚えた日を今日に更新 ／ 不正解 → 収集リストに戻ります</p>
+              )}
             </>
           ) : (
             <button onClick={() => setShowAnswer(true)} className="w-full bg-gray-800 text-white p-4 rounded-xl font-bold text-lg">答えを見る</button>
@@ -304,7 +343,7 @@ export default function QuizPage() {
     );
   }
 
-  // === SELECT PHASE (skip results, go directly here) ===
+  // === SELECT PHASE ===
   if (phase === 'select') {
     const batchResults = quizResults.filter(r => !r.isLongTerm);
     const ltResults = quizResults.filter(r => r.isLongTerm);
@@ -329,18 +368,19 @@ export default function QuizPage() {
           <p className="text-sm text-amber-600 mb-1">🏅 最終ステージ: 残す{config.to}個は {poolLabel} へ昇格</p>
         )}
         <p className="text-xs text-gray-400 mb-4">
-          選ばなかったフレーズ({batchResults.length - selCount}個) → 🔒 長期記憶チェックへ
+          選ばなかったフレーズ({Math.max(0, batchResults.length - selCount)}個) → 🔒 長期記憶へ
         </p>
 
-        {/* Long-term results summary */}
         {ltResults.length > 0 && (
           <div className="mb-4 p-3 rounded-lg bg-amber-50 border border-amber-200">
-            <p className="text-sm font-bold text-amber-700 mb-1">🔒 長期記憶チェック結果</p>
+            <p className="text-sm font-bold text-amber-700 mb-1">🔒 長期記憶チェック結果（保存済み）</p>
             {ltResults.map((r, i) => (
-              <div key={i} className="text-sm flex items-center gap-2">
+              <div key={i} className="text-sm flex items-center gap-2 py-0.5">
                 <span>{r.correct ? '✅' : '❌'}</span>
-                <span>{r.phrase.japanese}</span>
-                {!r.correct && <span className="text-xs text-red-500">→ 収集リストへ</span>}
+                <span className="flex-1">{r.phrase.japanese}</span>
+                {r.correct
+                  ? <span className="text-xs text-green-600">覚えた日を更新</span>
+                  : <span className="text-xs text-red-500">→ 収集リストへ</span>}
               </div>
             ))}
           </div>
@@ -386,8 +426,9 @@ export default function QuizPage() {
     );
   }
 
-  // === DRILL PHASE (all correct to finish) ===
+  // === DRILL PHASE ===
   if (phase === 'drill') {
+    if (saving) return <div className="min-h-screen flex items-center justify-center">保存中...</div>;
     const p = drillPhrases[drillIdx];
     if (!p) return null;
     return (
@@ -423,10 +464,16 @@ export default function QuizPage() {
 
   // === DONE PHASE ===
   if (phase === 'done') {
+    const ltResults = quizResults.filter(r => r.isLongTerm);
     return (
       <div className="max-w-lg mx-auto px-4 py-8 text-center">
         <p className="text-6xl mb-4">🎉</p>
         <h2 className="text-2xl font-bold mb-4">復習完了！</h2>
+        {ltResults.length > 0 && (
+          <p className="text-sm text-amber-700 mb-4">
+            🔒 長期記憶チェック: {ltResults.filter(r => r.correct).length}/{ltResults.length} 正解
+          </p>
+        )}
         <button onClick={() => router.push('/')} className="bg-blue-600 text-white px-8 py-3 rounded-xl font-bold text-lg">ホームに戻る</button>
       </div>
     );

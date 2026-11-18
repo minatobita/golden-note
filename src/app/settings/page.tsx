@@ -5,15 +5,14 @@ import { onAuthChange } from '@/lib/auth';
 import { getSettings, saveSettings } from '@/lib/db';
 import Navbar from '@/components/Navbar';
 
+const DEFAULT_INTERVALS: any = {
+  bronze_25_18: 1, bronze_18_13: 4, bronze_13_9: 14, bronze_9_6: 28,
+  silver_25_18: 1, silver_18_13: 4, silver_13_9: 14, silver_9_6: 28,
+  golden_25_18: 1, golden_18_13: 4, golden_13_9: 14, golden_9_6: 28,
+};
+
 const PRESETS: any = {
-  ebbinghaus: {
-    label: '忘却曲線ベース',
-    intervals: {
-      bronze_25_18: 1, bronze_18_13: 4, bronze_13_9: 14, bronze_9_6: 28,
-      silver_25_18: 1, silver_18_13: 4, silver_13_9: 14, silver_9_6: 28,
-      golden_25_18: 1, golden_18_13: 4, golden_13_9: 14, golden_9_6: 28,
-    },
-  },
+  ebbinghaus: { label: '忘却曲線ベース', intervals: { ...DEFAULT_INTERVALS } },
   original: {
     label: 'オリジナルGNM（2週間統一）',
     intervals: {
@@ -35,14 +34,7 @@ const PRESETS: any = {
 export default function SettingsPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
-  const [settings, setSettings] = useState<any>({
-    intervals: {
-      bronze_25_18: 1, bronze_18_13: 4, bronze_13_9: 14, bronze_9_6: 28,
-      silver_25_18: 1, silver_18_13: 4, silver_13_9: 14, silver_9_6: 28,
-      golden_25_18: 1, golden_18_13: 4, golden_13_9: 14, golden_9_6: 28,
-    },
-    longTermCheckDays: 90,
-  });
+  const [settings, setSettings] = useState<any>({ intervals: { ...DEFAULT_INTERVALS } });
   const [toast, setToast] = useState('');
 
   useEffect(() => {
@@ -50,7 +42,7 @@ export default function SettingsPage() {
       if (!u) { router.push('/login'); return; }
       setUser(u);
       const s = await getSettings(u.uid);
-      if (s) setSettings(s);
+      setSettings({ ...s, intervals: { ...DEFAULT_INTERVALS, ...(s?.intervals || {}) } });
     });
     return () => unsub();
   }, []);
@@ -61,25 +53,13 @@ export default function SettingsPage() {
   };
 
   const stages = [
-    { section: '🥉 ブロンズ', items: [
-      { key: 'bronze_25_18', label: '25→18' },
-      { key: 'bronze_18_13', label: '18→13' },
-      { key: 'bronze_13_9', label: '13→9' },
-      { key: 'bronze_9_6', label: '9→6' },
-    ]},
-    { section: '🥈 シルバー', items: [
-      { key: 'silver_25_18', label: '25→18' },
-      { key: 'silver_18_13', label: '18→13' },
-      { key: 'silver_13_9', label: '13→9' },
-      { key: 'silver_9_6', label: '9→6' },
-    ]},
-    { section: '🥇 ゴールデン', items: [
-      { key: 'golden_25_18', label: '25→18' },
-      { key: 'golden_18_13', label: '18→13' },
-      { key: 'golden_13_9', label: '13→9' },
-      { key: 'golden_9_6', label: '9→6' },
-    ]},
-  ];
+    { section: '🥉 ブロンズ', prefix: 'bronze' },
+    { section: '🥈 シルバー', prefix: 'silver' },
+    { section: '🥇 ゴールデン', prefix: 'golden' },
+  ].map(s => ({
+    section: s.section,
+    items: ['25_18', '18_13', '13_9', '9_6'].map(k => ({ key: `${s.prefix}_${k}`, label: k.replace('_', '→') })),
+  }));
 
   const handleSave = async () => {
     if (!user) return;
@@ -93,7 +73,6 @@ export default function SettingsPage() {
       {toast && <div className="fixed top-4 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-5 py-3 rounded-xl text-sm font-semibold z-50">{toast}</div>}
       <h1 className="text-2xl font-bold mb-4">⚙️ 設定</h1>
 
-      {/* Presets */}
       <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4">
         <h2 className="font-bold mb-3">📋 プリセット</h2>
         <div className="flex gap-2 flex-wrap">
@@ -106,7 +85,6 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Intervals */}
       <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4">
         <h2 className="font-bold mb-3">📅 復習間隔（日数）</h2>
         {stages.map(section => (
@@ -117,12 +95,13 @@ export default function SettingsPage() {
                 <div key={item.key} className="flex items-center gap-2">
                   <label className="text-sm font-medium w-16">{item.label}</label>
                   <input type="number" min={1} max={365}
-                    value={settings.intervals?.[item.key] || 1}
+                    value={settings.intervals?.[item.key] ?? 1}
                     onChange={e => setSettings({
                       ...settings,
                       intervals: { ...settings.intervals, [item.key]: parseInt(e.target.value) || 1 }
                     })}
                     className="w-20 p-2 border border-gray-300 rounded-lg text-center text-sm"
+                    style={{ fontSize: '16px' }}
                   />
                   <span className="text-xs text-gray-400">日後</span>
                 </div>
@@ -132,22 +111,17 @@ export default function SettingsPage() {
         ))}
       </div>
 
-      {/* Long-term check */}
       <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4">
         <h2 className="font-bold mb-3">🔒 長期記憶チェック</h2>
-        <div className="flex items-center gap-2">
-          <label className="text-sm font-medium">卒業後</label>
-          <input type="number" min={30} max={365}
-            value={settings.longTermCheckDays || 90}
-            onChange={e => setSettings({ ...settings, longTermCheckDays: parseInt(e.target.value) || 90 })}
-            className="w-20 p-2 border border-gray-300 rounded-lg text-center text-sm"
-          />
-          <span className="text-xs text-gray-400">日後からチェック</span>
-        </div>
+        <p className="text-sm text-gray-600">
+          日数の条件はありません。長期記憶フォルダーの<b>覚えた日が古い順</b>に、毎回の復習クイズへ3問ずつ混ざります。
+        </p>
+        <p className="text-xs text-gray-400 mt-2">
+          正解 → フォルダーに残り、覚えた日が今日に更新（列の最後へ）／ 不正解 → ホームの収集リストへ移動
+        </p>
       </div>
 
-      <button onClick={handleSave}
-        className="w-full bg-blue-600 text-white p-4 rounded-xl font-bold text-lg">
+      <button onClick={handleSave} className="w-full bg-blue-600 text-white p-4 rounded-xl font-bold text-lg">
         💾 設定を保存
       </button>
 
